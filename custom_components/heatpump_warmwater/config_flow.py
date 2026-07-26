@@ -20,17 +20,7 @@ from .const import (
     DOMAIN,
 )
 
-# Defaults pre-filled with the Weishaupt/EMMA/Solcast entity IDs from Dasing
-_DEFAULTS: dict[str, str] = {
-    CONF_ENTITY_WW_TEMP: "sensor.wh_warmwasser_warmwassertemperatur",
-    CONF_ENTITY_PV_FORECAST_THIS: "sensor.solcast_pv_forecast_dach_forecast_this_hour",
-    CONF_ENTITY_PV_FORECAST_NEXT: "sensor.solcast_pv_forecast_dach_forecast_next_hour",
-    CONF_ENTITY_PV_POWER: "sensor.emma_pv_output_power",
-    CONF_ENTITY_SOC: "sensor.emma_state_of_capacity",
-    CONF_ENTITY_WW_ENERGY: "sensor.wh_statistik_warmwasser_energie_heute",
-    CONF_ENTITY_WP_NORMAL: "number.wh_warmwasser_warmwasser_normal",
-    CONF_ENTITY_WP_ABSENK: "number.wh_warmwasser_warmwasser_absenk",
-}
+_DEFAULTS: dict[str, str] = {}
 
 
 def _schema(defaults: dict[str, str]) -> vol.Schema:
