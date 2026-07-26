@@ -68,7 +68,7 @@ class WarmwasserBoostCoordinator:
         self._eid_pv_next: str = _data[CONF_ENTITY_PV_FORECAST_NEXT]
         self._eid_pv_power: str = _data[CONF_ENTITY_PV_POWER]
         self._eid_soc: str = _data[CONF_ENTITY_SOC]
-        self._eid_ww_energy: str = _data[CONF_ENTITY_WW_ENERGY]
+        self._eid_ww_energy: str = _data.get(CONF_ENTITY_WW_ENERGY, "")
         self._eid_wp_normal: str = _data[CONF_ENTITY_WP_NORMAL]
         self._eid_wp_absenk: str = _data[CONF_ENTITY_WP_ABSENK]
 
@@ -191,7 +191,7 @@ class WarmwasserBoostCoordinator:
     @callback
     def _handle_daily_reset(self, now: datetime) -> None:
         _LOGGER.debug("Daily reset")
-        if self.boost_active:
+        if self.boost_active and self._eid_ww_energy:
             self.kwh_startwert = self._float(self._eid_ww_energy) or 0.0
         self.kwh_reset_time = now
         self.heute_gelaufen = False
@@ -287,8 +287,8 @@ class WarmwasserBoostCoordinator:
             blocking=True,
         )
 
-        # 4. Energy snapshot
-        self.kwh_startwert = self._float(self._eid_ww_energy) or 0.0
+        # 4. Energy snapshot (optional — skipped if no energy sensor configured)
+        self.kwh_startwert = (self._float(self._eid_ww_energy) or 0.0) if self._eid_ww_energy else 0.0
 
         # 5. Set flags and notify entities
         self.boost_active = True
@@ -417,8 +417,8 @@ class WarmwasserBoostCoordinator:
         self.status = STATUS_STOPPING
         self._notify("status")
 
-        # kWh calculation (skipped for startup healing — delta unreliable)
-        if reason in (REASON_STARTUP, REASON_STARTUP_BOOST):
+        # kWh calculation (skipped for startup healing or if no energy sensor)
+        if reason in (REASON_STARTUP, REASON_STARTUP_BOOST) or not self._eid_ww_energy:
             boost_kwh = 0.0
         else:
             energy_now = self._float(self._eid_ww_energy) or 0.0

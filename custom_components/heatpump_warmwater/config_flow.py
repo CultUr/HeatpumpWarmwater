@@ -45,7 +45,7 @@ def _schema(defaults: dict[str, str]) -> vol.Schema:
                 CONF_ENTITY_SOC,
                 default=defaults.get(CONF_ENTITY_SOC, ""),
             ): EntitySelector(EntitySelectorConfig(domain="sensor")),
-            vol.Required(
+            vol.Optional(
                 CONF_ENTITY_WW_ENERGY,
                 default=defaults.get(CONF_ENTITY_WW_ENERGY, ""),
             ): EntitySelector(EntitySelectorConfig(domain="sensor")),
@@ -64,6 +64,8 @@ def _schema(defaults: dict[str, str]) -> vol.Schema:
 def _validate_entities(hass: HomeAssistant, data: dict[str, str]) -> dict[str, str]:
     errors: dict[str, str] = {}
     for key, eid in data.items():
+        if not eid:  # optional field left empty
+            continue
         if not hass.states.get(eid):
             errors[key] = "entity_not_found"
     return errors
