@@ -1,0 +1,611 @@
+"""Core coordinator: all boost logic, Modbus-wait sequences, end conditions."""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime
+from typing import Any, Callable
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_change,
+)
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    BOOST_END_PV_DURATION_S,
+    BOOST_END_PV_THRESHOLD_W,
+    BOOST_END_SOC_DURATION_S,
+    BOOST_END_SOC_THRESHOLD_PCT,
+    BOOST_END_TEMP_HOLD_S,
+    BOOST_MAX_DURATION_S,
+    CONF_ENTITY_PV_FORECAST_NEXT,
+    CONF_ENTITY_PV_FORECAST_THIS,
+    CONF_ENTITY_PV_POWER,
+    CONF_ENTITY_SOC,
+    CONF_ENTITY_WP_ABSENK,
+    CONF_ENTITY_WP_NORMAL,
+    CONF_ENTITY_WW_ENERGY,
+    CONF_ENTITY_WW_TEMP,
+    DEFAULT_FRUHESTER_START_H,
+    DEFAULT_MIN_PV_FORECAST,
+    DEFAULT_MIN_SOC,
+    DEFAULT_RESET_TEMP,
+    DEFAULT_START_SCHWELLE,
+    DEFAULT_ZIEL_TEMP,
+    MODBUS_WAIT_TIMEOUT,
+    REASON_MANUELL,
+    REASON_PV,
+    REASON_SOC,
+    REASON_SONNE,
+    REASON_STARTUP,
+    REASON_STARTUP_BOOST,
+    REASON_TIMEOUT,
+    REASON_ZIEL,
+    STATUS_IDLE,
+    STATUS_RUNNING,
+    STATUS_STARTING,
+    STATUS_STOPPING,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class WarmwasserBoostCoordinator:
+    """Manages the WW PV-Boost logic (replaces 5 automations + 2 scripts)."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self.entry = entry
+
+        # External entity IDs from config flow (immutable)
+        self._eid_ww_temp: str = entry.data[CONF_ENTITY_WW_TEMP]
+        self._eid_pv_this: str = entry.data[CONF_ENTITY_PV_FORECAST_THIS]
+        self._eid_pv_next: str = entry.data[CONF_ENTITY_PV_FORECAST_NEXT]
+        self._eid_pv_power: str = entry.data[CONF_ENTITY_PV_POWER]
+        self._eid_soc: str = entry.data[CONF_ENTITY_SOC]
+        self._eid_ww_energy: str = entry.data[CONF_ENTITY_WW_ENERGY]
+        self._eid_wp_normal: str = entry.data[CONF_ENTITY_WP_NORMAL]
+        self._eid_wp_absenk: str = entry.data[CONF_ENTITY_WP_ABSENK]
+
+        # Configurable thresholds (written by Number entities after restore)
+        self.ziel_temp: float = DEFAULT_ZIEL_TEMP
+        self.reset_temp: float = DEFAULT_RESET_TEMP
+        self.min_pv_forecast: float = DEFAULT_MIN_PV_FORECAST
+        self.min_soc: float = DEFAULT_MIN_SOC
+        self.start_schwelle: float = DEFAULT_START_SCHWELLE
+        self.fruhester_start_h: int = DEFAULT_FRUHESTER_START_H
+
+        # Control flags (written by Switch entities after restore)
+        self.automatik: bool = True
+        self.urlaub: bool = False
+
+        # Runtime state (read by Sensor/BinarySensor entities)
+        self.boost_active: bool = False
+        self.heute_gelaufen: bool = False
+        self.kwh_heute: float = 0.0
+        self.kwh_startwert: float = 0.0
+        self.last_start: datetime | None = None
+        self.status: str = STATUS_IDLE
+
+        # Internal tasks and listeners
+        self._start_lock = asyncio.Lock()
+        self._active_tasks: set[asyncio.Task] = set()  # all coordinator-spawned tasks
+        self._timeout_task: asyncio.Task | None = None
+        self._pv_low_task: asyncio.Task | None = None
+        self._soc_low_task: asyncio.Task | None = None
+        self._temp_reached_task: asyncio.Task | None = None
+        self._unsub: list[CALLBACK_TYPE] = []
+        self._entities: dict[str, Any] = {}
+
+    # ------------------------------------------------------------------ #
+    # Entity registration
+    # ------------------------------------------------------------------ #
+
+    def register_entity(self, key: str, entity: Any) -> None:
+        self._entities[key] = entity
+
+    def _notify(self, *keys: str) -> None:
+        for key in keys:
+            if key in self._entities:
+                self._entities[key].async_write_ha_state()
+
+    def _notify_all(self) -> None:
+        for entity in self._entities.values():
+            entity.async_write_ha_state()
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle
+    # ------------------------------------------------------------------ #
+
+    async def async_setup(self) -> None:
+        """Register state listeners. Must be called after entities are set up."""
+        tracked = [
+            self._eid_ww_temp,
+            self._eid_pv_this,
+            self._eid_pv_next,
+            self._eid_pv_power,
+            self._eid_soc,
+            "sun.sun",
+        ]
+        self._unsub.append(
+            async_track_state_change_event(
+                self.hass, tracked, self._handle_sensor_change
+            )
+        )
+
+        # Daily reset at 00:05
+        self._unsub.append(
+            async_track_time_change(
+                self.hass, self._handle_daily_reset, hour=0, minute=5, second=0
+            )
+        )
+
+        # Recheck every 30 min (:00 and :30)
+        for minute in (0, 30):
+            self._unsub.append(
+                async_track_time_change(
+                    self.hass, self._handle_recheck, minute=minute, second=0
+                )
+            )
+
+        self._create_tracked_task(self._async_startup_healing())
+
+    async def async_unload(self) -> None:
+        for unsub in self._unsub:
+            unsub()
+        self._unsub.clear()
+        for task in list(self._active_tasks):
+            task.cancel()
+        self._active_tasks.clear()
+        for attr in (
+            "_timeout_task", "_pv_low_task", "_soc_low_task", "_temp_reached_task",
+        ):
+            self._cancel_task(attr)
+
+    # ------------------------------------------------------------------ #
+    # Event handlers
+    # ------------------------------------------------------------------ #
+
+    @callback
+    def _handle_sensor_change(self, event: Any) -> None:
+        eid: str = event.data.get("entity_id", "")
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in ("unavailable", "unknown"):
+            return
+        if self.boost_active:
+            self._create_tracked_task(self._check_end_conditions(eid))
+        else:
+            self._create_tracked_task(self._check_start_conditions("state_change"))
+
+    @callback
+    def _handle_recheck(self, now: datetime) -> None:
+        if not self.boost_active:
+            self._create_tracked_task(self._check_start_conditions("recheck"))
+
+    @callback
+    def _handle_daily_reset(self, now: datetime) -> None:
+        _LOGGER.debug("Daily reset")
+        if self.boost_active:
+            self.kwh_startwert = self._float(self._eid_ww_energy) or 0.0
+        self.heute_gelaufen = False
+        self.kwh_heute = 0.0
+        self._notify("heute_gelaufen", "kwh_heute")
+
+    # ------------------------------------------------------------------ #
+    # Start conditions
+    # ------------------------------------------------------------------ #
+
+    async def _check_start_conditions(self, trigger: str) -> None:
+        if self._start_lock.locked():
+            return
+        async with self._start_lock:
+            if not self._should_start():
+                return
+            await self._async_boost_start(f"Auto: {trigger}")
+
+    def _should_start(self) -> bool:
+        if not self.automatik or self.urlaub or self.boost_active or self.heute_gelaufen:
+            return False
+        if dt_util.now().hour < self.fruhester_start_h:
+            return False
+
+        sun = self.hass.states.get("sun.sun")
+        if sun:
+            if sun.state == "below_horizon":
+                return False
+            try:
+                if float(sun.attributes.get("elevation", 0)) <= 15.0:
+                    return False
+            except (ValueError, TypeError):
+                return False
+
+        pv_this = self._float(self._eid_pv_this)
+        pv_next = self._float(self._eid_pv_next)
+        soc = self._float(self._eid_soc)
+        ww_temp = self._float(self._eid_ww_temp)
+
+        if pv_this is None or pv_this <= self.min_pv_forecast:
+            return False
+        if pv_next is None or pv_next <= self.min_pv_forecast:
+            return False
+        if soc is None or soc <= self.min_soc:
+            return False
+        if ww_temp is None or ww_temp >= self.start_schwelle:
+            return False
+        return True
+
+    # ------------------------------------------------------------------ #
+    # Boost start sequence
+    # ------------------------------------------------------------------ #
+
+    async def _async_boost_start(self, reason: str) -> None:
+        _LOGGER.info("WW Boost Start: %s", reason)
+        self.status = STATUS_STARTING
+        self._notify("status")
+
+        target = self.ziel_temp
+
+        # 1. Raise Normal setpoint
+        await self.hass.services.async_call(
+            "number", "set_value",
+            {"entity_id": self._eid_wp_normal, "value": target},
+            blocking=True,
+        )
+
+        # 2. Wait for Absenk.max attribute to follow (Modbus propagation)
+        ok = await self._wait_attr(
+            self._eid_wp_absenk, "max",
+            lambda v: v >= target - 1,
+            MODBUS_WAIT_TIMEOUT,
+        )
+
+        if not ok:
+            _LOGGER.warning(
+                "Boost-Start abgebrochen: Absenk.max Timeout (max=%s, Ziel=%.1f)",
+                self._attr(self._eid_wp_absenk, "max"), target,
+            )
+            await self.hass.services.async_call(
+                "number", "set_value",
+                {"entity_id": self._eid_wp_normal, "value": self.reset_temp},
+                blocking=True,
+            )
+            self.status = STATUS_IDLE
+            self._notify("status")
+            return
+
+        # 3. Set Absenk setpoint
+        await self.hass.services.async_call(
+            "number", "set_value",
+            {"entity_id": self._eid_wp_absenk, "value": target - 1},
+            blocking=True,
+        )
+
+        # 4. Energy snapshot
+        self.kwh_startwert = self._float(self._eid_ww_energy) or 0.0
+
+        # 5. Set flags and notify entities
+        self.boost_active = True
+        self.heute_gelaufen = True
+        self.last_start = dt_util.now()
+        self.status = STATUS_RUNNING
+        self._notify_all()
+
+        # 6. Start 2.5h watchdog
+        self._cancel_task("_timeout_task")
+        self._timeout_task = self._create_tracked_task(self._boost_timeout())
+
+        _LOGGER.info(
+            "WW Boost aktiv (%s) — PV: %s W, SoC: %s%%, WW: %s°C, kWh-Start: %.3f",
+            reason,
+            self._float(self._eid_pv_this), self._float(self._eid_soc),
+            self._float(self._eid_ww_temp), self.kwh_startwert,
+        )
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                "logbook", "log",
+                {
+                    "name": "WW-Ueberladung",
+                    "message": (
+                        f"Start ({reason}) — "
+                        f"PV-Forecast: {self._float(self._eid_pv_this)} W "
+                        f"(next: {self._float(self._eid_pv_next)} W), "
+                        f"SoC: {self._float(self._eid_soc)} %, "
+                        f"WW-Temp: {self._float(self._eid_ww_temp)} °C, "
+                        f"kWh-Start: {self.kwh_startwert:.3f}"
+                    ),
+                },
+            )
+        )
+
+    async def _boost_timeout(self) -> None:
+        await asyncio.sleep(BOOST_MAX_DURATION_S)
+        if self.boost_active:
+            await self._async_boost_end(REASON_TIMEOUT)
+
+    # ------------------------------------------------------------------ #
+    # End conditions
+    # ------------------------------------------------------------------ #
+
+    async def _check_end_conditions(self, entity_id: str) -> None:
+        if not self.boost_active:
+            return
+
+        if entity_id == "sun.sun":
+            sun = self.hass.states.get("sun.sun")
+            if sun and sun.state == "below_horizon":
+                self._cancel_duration_tasks()
+                await self._async_boost_end(REASON_SONNE)
+            return
+
+        if entity_id == self._eid_ww_temp:
+            ww = self._float(self._eid_ww_temp)
+            if ww is not None and ww >= self.ziel_temp:
+                if self._temp_reached_task is None or self._temp_reached_task.done():
+                    self._temp_reached_task = self.hass.async_create_task(
+                        self._temp_hold_check()
+                    )
+            else:
+                self._cancel_task("_temp_reached_task")
+            return
+
+        if entity_id == self._eid_pv_power:
+            pv = self._float(self._eid_pv_power)
+            if pv is not None and pv < BOOST_END_PV_THRESHOLD_W:
+                if self._pv_low_task is None or self._pv_low_task.done():
+                    self._pv_low_task = self.hass.async_create_task(
+                        self._pv_low_timer()
+                    )
+            else:
+                self._cancel_task("_pv_low_task")
+            return
+
+        if entity_id == self._eid_soc:
+            soc = self._float(self._eid_soc)
+            if soc is not None and soc < BOOST_END_SOC_THRESHOLD_PCT:
+                if self._soc_low_task is None or self._soc_low_task.done():
+                    self._soc_low_task = self.hass.async_create_task(
+                        self._soc_low_timer()
+                    )
+            else:
+                self._cancel_task("_soc_low_task")
+
+    async def _temp_hold_check(self) -> None:
+        await asyncio.sleep(BOOST_END_TEMP_HOLD_S)
+        if self.boost_active:
+            ww = self._float(self._eid_ww_temp)
+            if ww is not None and ww >= self.ziel_temp:
+                self._cancel_duration_tasks()
+                await self._async_boost_end(REASON_ZIEL)
+
+    async def _pv_low_timer(self) -> None:
+        await asyncio.sleep(BOOST_END_PV_DURATION_S)
+        if self.boost_active:
+            pv = self._float(self._eid_pv_power)
+            if pv is not None and pv < BOOST_END_PV_THRESHOLD_W:
+                self._cancel_duration_tasks()
+                await self._async_boost_end(REASON_PV)
+
+    async def _soc_low_timer(self) -> None:
+        await asyncio.sleep(BOOST_END_SOC_DURATION_S)
+        if self.boost_active:
+            soc = self._float(self._eid_soc)
+            if soc is not None and soc < BOOST_END_SOC_THRESHOLD_PCT:
+                self._cancel_duration_tasks()
+                await self._async_boost_end(REASON_SOC)
+
+    def _cancel_duration_tasks(self) -> None:
+        for name in ("_pv_low_task", "_soc_low_task", "_temp_reached_task"):
+            self._cancel_task(name)
+
+    # ------------------------------------------------------------------ #
+    # Boost end sequence
+    # ------------------------------------------------------------------ #
+
+    async def _async_boost_end(self, reason: str) -> None:
+        if not self.boost_active:
+            return
+        self.boost_active = False  # prevent re-entry before any await
+
+        self._cancel_task("_timeout_task")
+        self.status = STATUS_STOPPING
+        self._notify("status")
+
+        # kWh calculation (skipped for startup healing — delta unreliable)
+        if reason in (REASON_STARTUP, REASON_STARTUP_BOOST):
+            boost_kwh = 0.0
+        else:
+            energy_now = self._float(self._eid_ww_energy) or 0.0
+            boost_kwh = max(0.0, energy_now - self.kwh_startwert)
+
+        # 1. Reset Absenk to standby value
+        await self.hass.services.async_call(
+            "number", "set_value",
+            {"entity_id": self._eid_wp_absenk, "value": 35.0},
+            blocking=True,
+        )
+
+        # 2. Wait for Normal.min to drop (Modbus propagation after Absenk reset)
+        reset = self.reset_temp
+        ok = await self._wait_attr(
+            self._eid_wp_normal, "min",
+            lambda v: v <= reset + 1,
+            MODBUS_WAIT_TIMEOUT,
+        )
+
+        if ok:
+            await self.hass.services.async_call(
+                "number", "set_value",
+                {"entity_id": self._eid_wp_normal, "value": reset},
+                blocking=True,
+            )
+        else:
+            normal_min = self._attr(self._eid_wp_normal, "min")
+            _LOGGER.warning(
+                "Normal-Sollwert Timeout nach Boost-Ende "
+                "(Normal.min=%s, Reset-Temp=%.1f). Bitte manuell pruefen.",
+                normal_min, reset,
+            )
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    "persistent_notification", "create",
+                    {
+                        "title": "WW-Ueberladung: Waermepumpe pruefen",
+                        "message": (
+                            f"Normal-Sollwert konnte nach Boost-Ende nicht zurueckgesetzt werden. "
+                            f"Bitte WP-Sollwert manuell auf {reset:.0f} Grad pruefen. "
+                            f"(Normal.min war: {normal_min} Grad)"
+                        ),
+                        "notification_id": "ww_boost_normal_reset_fehler",
+                    },
+                )
+            )
+
+        # 3. Accounting and flag reset
+        self.kwh_heute += boost_kwh
+        self.status = STATUS_IDLE
+        self._notify_all()
+
+        _LOGGER.info(
+            "WW Boost Ende (%s) — WW: %s°C, PV: %s W, SoC: %s%%, "
+            "Boost: %.3f kWh, Tag: %.3f kWh",
+            reason,
+            self._float(self._eid_ww_temp), self._float(self._eid_pv_power),
+            self._float(self._eid_soc), boost_kwh, self.kwh_heute,
+        )
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                "logbook", "log",
+                {
+                    "name": "WW-Ueberladung",
+                    "message": (
+                        f"Ende ({reason}) — "
+                        f"WW: {self._float(self._eid_ww_temp)} °C, "
+                        f"PV: {self._float(self._eid_pv_power)} W, "
+                        f"SoC: {self._float(self._eid_soc)} %, "
+                        f"Boost-kWh: {boost_kwh:.3f} kWh, "
+                        f"Tagesbilanz: {self.kwh_heute:.3f} kWh"
+                    ),
+                },
+            )
+        )
+
+    # ------------------------------------------------------------------ #
+    # Startup healing
+    # ------------------------------------------------------------------ #
+
+    async def _async_startup_healing(self) -> None:
+        await asyncio.sleep(120)
+        _LOGGER.debug("Startup-Heilung: Konsistenzpruefung...")
+
+        normal = self._float(self._eid_wp_normal)
+        if normal is None:
+            return
+
+        # Case 1: Normal elevated but boost marked as inactive
+        if not self.boost_active and normal > self.reset_temp:
+            _LOGGER.warning(
+                "Startup-Heilung Fall 1: Normal=%.1f > Reset=%.1f, aktiv=False",
+                normal, self.reset_temp,
+            )
+            await self._async_boost_end(REASON_STARTUP)
+            return
+
+        # Case 2: Boost marked active but stop condition already met
+        if self.boost_active:
+            sun = self.hass.states.get("sun.sun")
+            pv = self._float(self._eid_pv_power)
+            sun_below = sun and sun.state == "below_horizon"
+            pv_low = pv is not None and pv < BOOST_END_PV_THRESHOLD_W
+            if sun_below or pv_low:
+                _LOGGER.warning(
+                    "Startup-Heilung Fall 2: aktiv=True, Sonne=%s, PV=%s W",
+                    sun.state if sun else "unknown", pv,
+                )
+                await self._async_boost_end(REASON_STARTUP_BOOST)
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+
+    async def async_manual_start(self) -> None:
+        if self.boost_active or self.urlaub:
+            return
+        await self._async_boost_start("Manuell")
+
+    async def async_manual_end(self) -> None:
+        if self.boost_active:
+            self._cancel_duration_tasks()
+            await self._async_boost_end(REASON_MANUELL)
+
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+
+    async def _wait_attr(
+        self,
+        entity_id: str,
+        attribute: str,
+        condition: Callable[[float], bool],
+        timeout: float,
+    ) -> bool:
+        """Event-driven wait for a state attribute to satisfy a condition."""
+        current = self.hass.states.get(entity_id)
+        if current:
+            raw = current.attributes.get(attribute)
+            if raw is not None:
+                try:
+                    if condition(float(raw)):
+                        return True
+                except (ValueError, TypeError):
+                    pass
+
+        evt = asyncio.Event()
+
+        @callback
+        def _listener(ha_event: Any) -> None:
+            ns = ha_event.data.get("new_state")
+            if ns:
+                raw = ns.attributes.get(attribute)
+                if raw is not None:
+                    try:
+                        if condition(float(raw)):
+                            evt.set()
+                    except (ValueError, TypeError):
+                        pass
+
+        unsub = async_track_state_change_event(self.hass, [entity_id], _listener)
+        try:
+            await asyncio.wait_for(evt.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            unsub()
+
+    def _float(self, entity_id: str) -> float | None:
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown", "none"):
+            return None
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
+
+    def _attr(self, entity_id: str, attribute: str, default: Any = None) -> Any:
+        state = self.hass.states.get(entity_id)
+        return state.attributes.get(attribute, default) if state else default
+
+    def _cancel_task(self, attr_name: str) -> None:
+        task: asyncio.Task | None = getattr(self, attr_name, None)
+        if task and not task.done():
+            task.cancel()
+        setattr(self, attr_name, None)
+
+    def _create_tracked_task(self, coro: Any) -> asyncio.Task:
+        task = self.hass.async_create_task(coro)
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
+        return task

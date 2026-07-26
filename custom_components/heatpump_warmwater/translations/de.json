@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "WW PV Boost einrichten",
+        "description": "Waehle die HA-Entities fuer Weishaupt-WP, PV-Anlage und Speicher.",
+        "data": {
+          "entity_ww_temp": "WW-Temperatur (Sensor)",
+          "entity_pv_forecast_this_hour": "PV-Forecast aktuelle Stunde (Sensor)",
+          "entity_pv_forecast_next_hour": "PV-Forecast naechste Stunde (Sensor)",
+          "entity_pv_power": "PV-Leistung aktuell (Sensor)",
+          "entity_soc": "Akku-Ladezustand SoC (Sensor)",
+          "entity_ww_energy": "WW-Energie heute (Sensor)",
+          "entity_wp_normal": "WP Normal-Sollwert (Number)",
+          "entity_wp_absenk": "WP Absenk-Sollwert (Number)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "automatik": { "name": "Automatik" },
+      "urlaub": { "name": "Urlaub" }
+    },
+    "binary_sensor": {
+      "aktiv": { "name": "Boost aktiv" },
+      "heute_gelaufen": { "name": "Heute gelaufen" }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "idle": "Bereit",
+          "starting": "Startet",
+          "running": "Aktiv",
+          "stopping": "Stoppt"
+        }
+      },
+      "kwh_heute": { "name": "kWh heute" },
+      "letzter_start": { "name": "Letzter Start" }
+    },
+    "number": {
+      "ziel_temp": { "name": "Ziel-Temperatur" },
+      "reset_temp": { "name": "Reset-Temperatur" },
+      "schwelle": { "name": "Start-Schwelle WW" },
+      "min_pv": { "name": "Min PV-Forecast" },
+      "min_soc": { "name": "Min Akku-SoC" },
+      "fruhester": { "name": "Fruehester Start (Stunde)" }
+    },
+    "button": {
+      "btn_start": { "name": "Manuell starten" },
+      "btn_end": { "name": "Manuell beenden" }
+    }
+  }
+}
