@@ -1,11 +1,12 @@
-"""Config Flow: select external entity IDs for WW Boost integration."""
+"""Config Flow + Options Flow: select external entity IDs for WW Boost."""
 from __future__ import annotations
 
 from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
 
 from .const import (
@@ -19,8 +20,6 @@ from .const import (
     CONF_ENTITY_WW_TEMP,
     DOMAIN,
 )
-
-_DEFAULTS: dict[str, str] = {}
 
 
 def _schema(defaults: dict[str, str]) -> vol.Schema:
@@ -62,10 +61,23 @@ def _schema(defaults: dict[str, str]) -> vol.Schema:
     )
 
 
+def _validate_entities(hass: HomeAssistant, data: dict[str, str]) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    for key, eid in data.items():
+        if not hass.states.get(eid):
+            errors[key] = "entity_not_found"
+    return errors
+
+
 class HeatpumpWarmwaterConfigFlow(ConfigFlow, domain=DOMAIN):
     """Config flow for Heatpump Warmwater PV Boost."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return HeatpumpWarmwaterOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -74,6 +86,35 @@ class HeatpumpWarmwaterConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="single_instance_allowed")
 
         if user_input is not None:
-            return self.async_create_entry(title="WW PV Boost", data=user_input)
+            errors = _validate_entities(self.hass, user_input)
+            if not errors:
+                return self.async_create_entry(title="WW PV Boost", data=user_input)
+            return self.async_show_form(
+                step_id="user", data_schema=_schema(user_input), errors=errors
+            )
 
-        return self.async_show_form(step_id="user", data_schema=_schema(_DEFAULTS))
+        return self.async_show_form(step_id="user", data_schema=_schema({}))
+
+
+class HeatpumpWarmwaterOptionsFlow(OptionsFlow):
+    """Options flow: update entity IDs after initial setup."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self._entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        current = {**self._entry.data, **self._entry.options}
+
+        if user_input is not None:
+            errors = _validate_entities(self.hass, user_input)
+            if not errors:
+                return self.async_create_entry(title="", data=user_input)
+            return self.async_show_form(
+                step_id="init",
+                data_schema=_schema({**current, **user_input}),
+                errors=errors,
+            )
+
+        return self.async_show_form(step_id="init", data_schema=_schema(current))

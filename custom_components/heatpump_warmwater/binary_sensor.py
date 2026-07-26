@@ -4,6 +4,7 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -29,6 +30,13 @@ class _BaseBinarySensor(BinarySensorEntity, RestoreEntity):
         self._coordinator = coordinator
         self._key = key
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._coordinator.entry.entry_id)},
+            name="WW PV Boost",
+        )
 
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()

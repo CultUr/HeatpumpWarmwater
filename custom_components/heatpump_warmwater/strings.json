@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "WW PV Boost einrichten",
-        "description": "Waehle die HA-Entities fuer Weishaupt-WP, PV-Anlage und Speicher.",
+        "description": "Waehle die HA-Entities fuer Waermepumpe, PV-Anlage und Speicher.",
         "data": {
           "entity_ww_temp": "WW-Temperatur (Sensor)",
           "entity_pv_forecast_this_hour": "PV-Forecast aktuelle Stunde (Sensor)",
@@ -15,6 +15,33 @@
           "entity_wp_absenk": "WP Absenk-Sollwert (Number)"
         }
       }
+    },
+    "abort": {
+      "single_instance_allowed": "WW PV Boost kann nur einmal konfiguriert werden."
+    },
+    "error": {
+      "entity_not_found": "Entity nicht gefunden. Bitte eine gueltige Entity auswaehlen."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "WW PV Boost — Entities aendern",
+        "description": "Entity-IDs fuer Waermepumpe, PV-Anlage und Speicher aktualisieren.",
+        "data": {
+          "entity_ww_temp": "WW-Temperatur (Sensor)",
+          "entity_pv_forecast_this_hour": "PV-Forecast aktuelle Stunde (Sensor)",
+          "entity_pv_forecast_next_hour": "PV-Forecast naechste Stunde (Sensor)",
+          "entity_pv_power": "PV-Leistung aktuell (Sensor)",
+          "entity_soc": "Akku-Ladezustand SoC (Sensor)",
+          "entity_ww_energy": "WW-Energie heute (Sensor)",
+          "entity_wp_normal": "WP Normal-Sollwert (Number)",
+          "entity_wp_absenk": "WP Absenk-Sollwert (Number)"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Entity nicht gefunden. Bitte eine gueltige Entity auswaehlen."
     }
   }
 }

@@ -1,0 +1,82 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "WW PV Boost Setup",
+        "description": "Select the HA entities for heat pump, PV system and battery.",
+        "data": {
+          "entity_ww_temp": "Hot water temperature (sensor)",
+          "entity_pv_forecast_this_hour": "PV forecast current hour (sensor)",
+          "entity_pv_forecast_next_hour": "PV forecast next hour (sensor)",
+          "entity_pv_power": "Current PV power (sensor)",
+          "entity_soc": "Battery state of charge (sensor)",
+          "entity_ww_energy": "Hot water energy today (sensor)",
+          "entity_wp_normal": "Heat pump normal setpoint (number)",
+          "entity_wp_absenk": "Heat pump setback setpoint (number)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance of WW PV Boost can be configured."
+    },
+    "error": {
+      "entity_not_found": "Entity not found. Please select a valid entity."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "WW PV Boost — Update entities",
+        "description": "Update the HA entity IDs for heat pump, PV system and battery.",
+        "data": {
+          "entity_ww_temp": "Hot water temperature (sensor)",
+          "entity_pv_forecast_this_hour": "PV forecast current hour (sensor)",
+          "entity_pv_forecast_next_hour": "PV forecast next hour (sensor)",
+          "entity_pv_power": "Current PV power (sensor)",
+          "entity_soc": "Battery state of charge (sensor)",
+          "entity_ww_energy": "Hot water energy today (sensor)",
+          "entity_wp_normal": "Heat pump normal setpoint (number)",
+          "entity_wp_absenk": "Heat pump setback setpoint (number)"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Entity not found. Please select a valid entity."
+    }
+  },
+  "entity": {
+    "switch": {
+      "automatik": { "name": "Automatic" },
+      "urlaub": { "name": "Holiday mode" }
+    },
+    "binary_sensor": {
+      "aktiv": { "name": "Boost active" },
+      "heute_gelaufen": { "name": "Ran today" }
+    },
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "idle": "Idle",
+          "starting": "Starting",
+          "running": "Running",
+          "stopping": "Stopping"
+        }
+      },
+      "kwh_heute": { "name": "kWh today" },
+      "letzter_start": { "name": "Last start" }
+    },
+    "number": {
+      "ziel_temp": { "name": "Target temperature" },
+      "reset_temp": { "name": "Reset temperature" },
+      "schwelle": { "name": "Start threshold" },
+      "min_pv": { "name": "Min PV forecast" },
+      "min_soc": { "name": "Min battery SoC" },
+      "fruhester": { "name": "Earliest start (hour)" }
+    },
+    "button": {
+      "btn_start": { "name": "Manual start" },
+      "btn_end": { "name": "Manual stop" }
+    }
+  }
+}

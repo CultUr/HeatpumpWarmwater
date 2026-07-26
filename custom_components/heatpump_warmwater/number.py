@@ -5,9 +5,9 @@ from dataclasses import dataclass
 
 from homeassistant.components.number import NumberEntity, NumberEntityDescription, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
-from homeassistant.const import EntityCategory
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
@@ -137,6 +137,13 @@ class WwNumber(NumberEntity, RestoreEntity):
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{description.key}"
         self._value: float = description.default
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._coordinator.entry.entry_id)},
+            name="WW PV Boost",
+        )
 
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()

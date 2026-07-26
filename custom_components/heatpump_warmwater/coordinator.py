@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any, Callable
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -60,15 +61,16 @@ class WarmwasserBoostCoordinator:
         self.hass = hass
         self.entry = entry
 
-        # External entity IDs from config flow (immutable)
-        self._eid_ww_temp: str = entry.data[CONF_ENTITY_WW_TEMP]
-        self._eid_pv_this: str = entry.data[CONF_ENTITY_PV_FORECAST_THIS]
-        self._eid_pv_next: str = entry.data[CONF_ENTITY_PV_FORECAST_NEXT]
-        self._eid_pv_power: str = entry.data[CONF_ENTITY_PV_POWER]
-        self._eid_soc: str = entry.data[CONF_ENTITY_SOC]
-        self._eid_ww_energy: str = entry.data[CONF_ENTITY_WW_ENERGY]
-        self._eid_wp_normal: str = entry.data[CONF_ENTITY_WP_NORMAL]
-        self._eid_wp_absenk: str = entry.data[CONF_ENTITY_WP_ABSENK]
+        # External entity IDs — options override initial data
+        _data = {**entry.data, **entry.options}
+        self._eid_ww_temp: str = _data[CONF_ENTITY_WW_TEMP]
+        self._eid_pv_this: str = _data[CONF_ENTITY_PV_FORECAST_THIS]
+        self._eid_pv_next: str = _data[CONF_ENTITY_PV_FORECAST_NEXT]
+        self._eid_pv_power: str = _data[CONF_ENTITY_PV_POWER]
+        self._eid_soc: str = _data[CONF_ENTITY_SOC]
+        self._eid_ww_energy: str = _data[CONF_ENTITY_WW_ENERGY]
+        self._eid_wp_normal: str = _data[CONF_ENTITY_WP_NORMAL]
+        self._eid_wp_absenk: str = _data[CONF_ENTITY_WP_ABSENK]
 
         # Configurable thresholds (written by Number entities after restore)
         self.ziel_temp: float = DEFAULT_ZIEL_TEMP
@@ -87,6 +89,7 @@ class WarmwasserBoostCoordinator:
         self.heute_gelaufen: bool = False
         self.kwh_heute: float = 0.0
         self.kwh_startwert: float = 0.0
+        self.kwh_reset_time: datetime = dt_util.now().replace(hour=0, minute=5, second=0, microsecond=0)
         self.last_start: datetime | None = None
         self.status: str = STATUS_IDLE
 
@@ -190,6 +193,7 @@ class WarmwasserBoostCoordinator:
         _LOGGER.debug("Daily reset")
         if self.boost_active:
             self.kwh_startwert = self._float(self._eid_ww_energy) or 0.0
+        self.kwh_reset_time = now
         self.heute_gelaufen = False
         self.kwh_heute = 0.0
         self._notify("heute_gelaufen", "kwh_heute")
@@ -344,7 +348,7 @@ class WarmwasserBoostCoordinator:
             ww = self._float(self._eid_ww_temp)
             if ww is not None and ww >= self.ziel_temp:
                 if self._temp_reached_task is None or self._temp_reached_task.done():
-                    self._temp_reached_task = self.hass.async_create_task(
+                    self._temp_reached_task = self._create_tracked_task(
                         self._temp_hold_check()
                     )
             else:
@@ -355,7 +359,7 @@ class WarmwasserBoostCoordinator:
             pv = self._float(self._eid_pv_power)
             if pv is not None and pv < BOOST_END_PV_THRESHOLD_W:
                 if self._pv_low_task is None or self._pv_low_task.done():
-                    self._pv_low_task = self.hass.async_create_task(
+                    self._pv_low_task = self._create_tracked_task(
                         self._pv_low_timer()
                     )
             else:
@@ -366,7 +370,7 @@ class WarmwasserBoostCoordinator:
             soc = self._float(self._eid_soc)
             if soc is not None and soc < BOOST_END_SOC_THRESHOLD_PCT:
                 if self._soc_low_task is None or self._soc_low_task.done():
-                    self._soc_low_task = self.hass.async_create_task(
+                    self._soc_low_task = self._create_tracked_task(
                         self._soc_low_timer()
                     )
             else:
@@ -604,7 +608,7 @@ class WarmwasserBoostCoordinator:
             task.cancel()
         setattr(self, attr_name, None)
 
-    def _create_tracked_task(self, coro: Any) -> asyncio.Task:
+    def _create_tracked_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
         task = self.hass.async_create_task(coro)
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)

@@ -61,6 +61,8 @@ Startet die Warmwasser-Aufheizung automatisch, wenn genug PV-Leistung und Akkuka
 
 **Startup-Heilung:** 2 min nach HA-Neustart prueft die Integration auf zwei Inkonsistenz-Faelle (Boost-Flag und Sollwert stimmen nicht ueberein).
 
+**Manueller Start:** Der manuelle Start-Button ignoriert `heute_gelaufen` bewusst — ein zweiter Boost am selben Tag ist damit als Override moeglich.
+
 ## Getestet mit
 
 - Weishaupt Biblock WWP LB 12-A (Modbus via `weishaupt_modbus` HACS-Integration)

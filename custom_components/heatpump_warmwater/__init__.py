@@ -20,7 +20,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Then start listeners (coordinator reads restored entity state)
     await coordinator.async_setup()
 
+    # Reload on options change (entity IDs updated via options flow)
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
+
     return True
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

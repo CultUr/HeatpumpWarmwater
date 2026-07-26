@@ -11,10 +11,11 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import DOMAIN, KEY_KWH, KEY_LETZTER_START, KEY_STATUS
+from .const import DOMAIN, KEY_KWH, KEY_LETZTER_START, KEY_STATUS, STATUS_IDLE, STATUS_RUNNING
 from .coordinator import WarmwasserBoostCoordinator
 
 
@@ -42,9 +43,17 @@ class StatusSensor(SensorEntity, RestoreEntity):
         self._coordinator = coordinator
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{KEY_STATUS}"
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._coordinator.entry.entry_id)},
+            name="WW PV Boost",
+        )
+
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unavailable", "unknown"):
+        # Only restore stable states — starting/stopping are transient
+        if last is not None and last.state in (STATUS_IDLE, STATUS_RUNNING):
             self._coordinator.status = last.state
         self._coordinator.register_entity(KEY_STATUS, self)
 
@@ -65,6 +74,17 @@ class KwhHeuteSensor(SensorEntity, RestoreEntity):
     def __init__(self, coordinator: WarmwasserBoostCoordinator) -> None:
         self._coordinator = coordinator
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{KEY_KWH}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._coordinator.entry.entry_id)},
+            name="WW PV Boost",
+        )
+
+    @property
+    def last_reset(self) -> datetime:
+        return self._coordinator.kwh_reset_time
 
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()
@@ -89,6 +109,13 @@ class LetzterStartSensor(SensorEntity, RestoreEntity):
     def __init__(self, coordinator: WarmwasserBoostCoordinator) -> None:
         self._coordinator = coordinator
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{KEY_LETZTER_START}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._coordinator.entry.entry_id)},
+            name="WW PV Boost",
+        )
 
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()
