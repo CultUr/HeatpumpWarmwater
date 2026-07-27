@@ -3,16 +3,19 @@
     "step": {
       "user": {
         "title": "WW PV Boost Setup",
-        "description": "Select the HA entities for heat pump, PV system and battery.",
+        "description": "Required: heat pump entities, PV sensors, battery SoC, hot water temp. Optional fields improve the start logic.",
         "data": {
           "entity_ww_temp": "Hot water temperature (sensor)",
           "entity_pv_forecast_this_hour": "PV forecast current hour (sensor)",
           "entity_pv_forecast_next_hour": "PV forecast next hour (sensor)",
           "entity_pv_power": "Current PV power (sensor)",
           "entity_soc": "Battery state of charge (sensor)",
-          "entity_ww_energy": "Hot water energy today (sensor)",
+          "entity_ww_energy": "Hot water energy today (sensor, optional)",
           "entity_wp_normal": "Heat pump normal setpoint (number)",
-          "entity_wp_absenk": "Heat pump setback setpoint (number)"
+          "entity_wp_absenk": "Heat pump setback setpoint (number)",
+          "entity_solcast_today_kwh": "Solcast daily forecast today kWh (sensor, optional)",
+          "entity_solcast_tomorrow_kwh": "Solcast daily forecast tomorrow kWh (sensor, optional)",
+          "entity_grid_power": "Grid power in W, negative = export (sensor, optional)"
         }
       }
     },
@@ -27,16 +30,19 @@
     "step": {
       "init": {
         "title": "WW PV Boost — Update entities",
-        "description": "Update the HA entity IDs for heat pump, PV system and battery.",
+        "description": "Update entity IDs. Leave optional fields empty to disable them.",
         "data": {
           "entity_ww_temp": "Hot water temperature (sensor)",
           "entity_pv_forecast_this_hour": "PV forecast current hour (sensor)",
           "entity_pv_forecast_next_hour": "PV forecast next hour (sensor)",
           "entity_pv_power": "Current PV power (sensor)",
           "entity_soc": "Battery state of charge (sensor)",
-          "entity_ww_energy": "Hot water energy today (sensor)",
+          "entity_ww_energy": "Hot water energy today (sensor, optional)",
           "entity_wp_normal": "Heat pump normal setpoint (number)",
-          "entity_wp_absenk": "Heat pump setback setpoint (number)"
+          "entity_wp_absenk": "Heat pump setback setpoint (number)",
+          "entity_solcast_today_kwh": "Solcast daily forecast today kWh (sensor, optional)",
+          "entity_solcast_tomorrow_kwh": "Solcast daily forecast tomorrow kWh (sensor, optional)",
+          "entity_grid_power": "Grid power in W, negative = export (sensor, optional)"
         }
       }
     },
@@ -71,8 +77,12 @@
       "reset_temp": { "name": "Reset temperature" },
       "schwelle": { "name": "Start threshold" },
       "min_pv": { "name": "Min PV forecast" },
-      "min_soc": { "name": "Min battery SoC" },
-      "fruhester": { "name": "Earliest start (hour)" }
+      "min_soc": { "name": "Min battery SoC (forecast start)" },
+      "fruhester": { "name": "Earliest start (hour)" },
+      "min_forecast_today_kwh": { "name": "Min daily PV forecast today (kWh)" },
+      "min_forecast_tomorrow_kwh": { "name": "Postpone if tomorrow better (kWh)" },
+      "min_grid_surplus_w": { "name": "Min grid export for reactive start (W)" },
+      "min_soc_grid": { "name": "Min battery SoC for reactive start (%)" }
     },
     "button": {
       "btn_start": { "name": "Manual start" },

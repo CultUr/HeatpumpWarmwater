@@ -3,16 +3,19 @@
     "step": {
       "user": {
         "title": "WW PV Boost einrichten",
-        "description": "Waehle die HA-Entities fuer Waermepumpe, PV-Anlage und Speicher.",
+        "description": "Pflichtfelder: WP-Entities, PV-Sensoren, Akku-SoC, WW-Temp. Optionale Felder verbessern die Startlogik.",
         "data": {
           "entity_ww_temp": "WW-Temperatur (Sensor)",
           "entity_pv_forecast_this_hour": "PV-Forecast aktuelle Stunde (Sensor)",
           "entity_pv_forecast_next_hour": "PV-Forecast naechste Stunde (Sensor)",
           "entity_pv_power": "PV-Leistung aktuell (Sensor)",
           "entity_soc": "Akku-Ladezustand SoC (Sensor)",
-          "entity_ww_energy": "WW-Energie heute (Sensor)",
+          "entity_ww_energy": "WW-Energie heute (Sensor, optional)",
           "entity_wp_normal": "WP Normal-Sollwert (Number)",
-          "entity_wp_absenk": "WP Absenk-Sollwert (Number)"
+          "entity_wp_absenk": "WP Absenk-Sollwert (Number)",
+          "entity_solcast_today_kwh": "Solcast Tages-Forecast heute kWh (Sensor, optional)",
+          "entity_solcast_tomorrow_kwh": "Solcast Tages-Forecast morgen kWh (Sensor, optional)",
+          "entity_grid_power": "Netz-Leistung in W, negativ = Einspeisung (Sensor, optional)"
         }
       }
     },
@@ -27,16 +30,19 @@
     "step": {
       "init": {
         "title": "WW PV Boost — Entities aendern",
-        "description": "Entity-IDs fuer Waermepumpe, PV-Anlage und Speicher aktualisieren.",
+        "description": "Entity-IDs aktualisieren. Optionale Felder leer lassen um sie zu deaktivieren.",
         "data": {
           "entity_ww_temp": "WW-Temperatur (Sensor)",
           "entity_pv_forecast_this_hour": "PV-Forecast aktuelle Stunde (Sensor)",
           "entity_pv_forecast_next_hour": "PV-Forecast naechste Stunde (Sensor)",
           "entity_pv_power": "PV-Leistung aktuell (Sensor)",
           "entity_soc": "Akku-Ladezustand SoC (Sensor)",
-          "entity_ww_energy": "WW-Energie heute (Sensor)",
+          "entity_ww_energy": "WW-Energie heute (Sensor, optional)",
           "entity_wp_normal": "WP Normal-Sollwert (Number)",
-          "entity_wp_absenk": "WP Absenk-Sollwert (Number)"
+          "entity_wp_absenk": "WP Absenk-Sollwert (Number)",
+          "entity_solcast_today_kwh": "Solcast Tages-Forecast heute kWh (Sensor, optional)",
+          "entity_solcast_tomorrow_kwh": "Solcast Tages-Forecast morgen kWh (Sensor, optional)",
+          "entity_grid_power": "Netz-Leistung in W, negativ = Einspeisung (Sensor, optional)"
         }
       }
     },
@@ -71,8 +77,12 @@
       "reset_temp": { "name": "Reset-Temperatur" },
       "schwelle": { "name": "Start-Schwelle WW" },
       "min_pv": { "name": "Min PV-Forecast" },
-      "min_soc": { "name": "Min Akku-SoC" },
-      "fruhester": { "name": "Fruehester Start (Stunde)" }
+      "min_soc": { "name": "Min Akku-SoC (Forecast-Start)" },
+      "fruhester": { "name": "Fruehester Start (Stunde)" },
+      "min_forecast_today_kwh": { "name": "Min Tages-PV-Forecast (kWh)" },
+      "min_forecast_tomorrow_kwh": { "name": "Aufschub wenn morgen besser (kWh)" },
+      "min_grid_surplus_w": { "name": "Min Netz-Einspeisung Reaktiv-Start (W)" },
+      "min_soc_grid": { "name": "Min Akku-SoC Reaktiv-Start (%)" }
     },
     "button": {
       "btn_start": { "name": "Manuell starten" },

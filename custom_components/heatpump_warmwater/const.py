@@ -12,6 +12,10 @@ CONF_ENTITY_SOC = "entity_soc"
 CONF_ENTITY_WW_ENERGY = "entity_ww_energy"
 CONF_ENTITY_WP_NORMAL = "entity_wp_normal"
 CONF_ENTITY_WP_ABSENK = "entity_wp_absenk"
+# Optional: Solcast daily totals and grid power for improved start logic
+CONF_ENTITY_SOLCAST_TODAY_KWH = "entity_solcast_today_kwh"
+CONF_ENTITY_SOLCAST_TOMORROW_KWH = "entity_solcast_tomorrow_kwh"
+CONF_ENTITY_GRID_POWER = "entity_grid_power"
 
 # Default threshold values (adjustable via Number entities at runtime)
 DEFAULT_ZIEL_TEMP = 53.0          # °C
@@ -20,6 +24,10 @@ DEFAULT_MIN_PV_FORECAST = 1500.0  # W
 DEFAULT_MIN_SOC = 60.0            # %
 DEFAULT_START_SCHWELLE = 48.0     # °C — boost only if WW temp is below this
 DEFAULT_FRUHESTER_START_H = 11    # hour 0-23 (frühester Start)
+DEFAULT_MIN_FORECAST_TODAY_KWH = 6.0    # kWh — Mindestertrag heute für Forecast-Start
+DEFAULT_MIN_FORECAST_TOMORROW_KWH = 15.0  # kWh — "morgen viel besser" → heute aufschieben
+DEFAULT_MIN_GRID_SURPLUS_W = 1000.0     # W Einspeisung ins Netz → reaktiver Start
+DEFAULT_MIN_SOC_GRID = 20.0             # % — niedrigere SoC-Schwelle bei Überschuss-Start
 
 # Modbus wait timeout
 MODBUS_WAIT_TIMEOUT = 120.0  # seconds
@@ -62,3 +70,7 @@ KEY_MIN_PV = "min_pv"
 KEY_MIN_SOC = "min_soc"
 KEY_SCHWELLE = "schwelle"
 KEY_FRUHESTER = "fruhester_start_h"
+KEY_MIN_TODAY_KWH = "min_forecast_today_kwh"
+KEY_MIN_TOMORROW_KWH = "min_forecast_tomorrow_kwh"
+KEY_MIN_GRID_SURPLUS = "min_grid_surplus_w"
+KEY_MIN_SOC_GRID = "min_soc_grid"

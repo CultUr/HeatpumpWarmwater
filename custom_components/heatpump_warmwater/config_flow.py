@@ -10,10 +10,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
 
 from .const import (
+    CONF_ENTITY_GRID_POWER,
     CONF_ENTITY_PV_FORECAST_NEXT,
     CONF_ENTITY_PV_FORECAST_THIS,
     CONF_ENTITY_PV_POWER,
     CONF_ENTITY_SOC,
+    CONF_ENTITY_SOLCAST_TODAY_KWH,
+    CONF_ENTITY_SOLCAST_TOMORROW_KWH,
     CONF_ENTITY_WP_ABSENK,
     CONF_ENTITY_WP_NORMAL,
     CONF_ENTITY_WW_ENERGY,
@@ -57,6 +60,18 @@ def _schema(defaults: dict[str, str]) -> vol.Schema:
                 CONF_ENTITY_WP_ABSENK,
                 default=defaults.get(CONF_ENTITY_WP_ABSENK, ""),
             ): EntitySelector(EntitySelectorConfig(domain="number")),
+            vol.Optional(
+                CONF_ENTITY_SOLCAST_TODAY_KWH,
+                default=defaults.get(CONF_ENTITY_SOLCAST_TODAY_KWH, ""),
+            ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+            vol.Optional(
+                CONF_ENTITY_SOLCAST_TOMORROW_KWH,
+                default=defaults.get(CONF_ENTITY_SOLCAST_TOMORROW_KWH, ""),
+            ): EntitySelector(EntitySelectorConfig(domain="sensor")),
+            vol.Optional(
+                CONF_ENTITY_GRID_POWER,
+                default=defaults.get(CONF_ENTITY_GRID_POWER, ""),
+            ): EntitySelector(EntitySelectorConfig(domain="sensor")),
         }
     )
 

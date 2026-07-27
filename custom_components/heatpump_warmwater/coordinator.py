@@ -22,17 +22,24 @@ from .const import (
     BOOST_END_SOC_THRESHOLD_PCT,
     BOOST_END_TEMP_HOLD_S,
     BOOST_MAX_DURATION_S,
+    CONF_ENTITY_GRID_POWER,
     CONF_ENTITY_PV_FORECAST_NEXT,
     CONF_ENTITY_PV_FORECAST_THIS,
     CONF_ENTITY_PV_POWER,
     CONF_ENTITY_SOC,
+    CONF_ENTITY_SOLCAST_TODAY_KWH,
+    CONF_ENTITY_SOLCAST_TOMORROW_KWH,
     CONF_ENTITY_WP_ABSENK,
     CONF_ENTITY_WP_NORMAL,
     CONF_ENTITY_WW_ENERGY,
     CONF_ENTITY_WW_TEMP,
     DEFAULT_FRUHESTER_START_H,
+    DEFAULT_MIN_FORECAST_TODAY_KWH,
+    DEFAULT_MIN_FORECAST_TOMORROW_KWH,
+    DEFAULT_MIN_GRID_SURPLUS_W,
     DEFAULT_MIN_PV_FORECAST,
     DEFAULT_MIN_SOC,
+    DEFAULT_MIN_SOC_GRID,
     DEFAULT_RESET_TEMP,
     DEFAULT_START_SCHWELLE,
     DEFAULT_ZIEL_TEMP,
@@ -71,6 +78,10 @@ class WarmwasserBoostCoordinator:
         self._eid_ww_energy: str = _data.get(CONF_ENTITY_WW_ENERGY, "")
         self._eid_wp_normal: str = _data[CONF_ENTITY_WP_NORMAL]
         self._eid_wp_absenk: str = _data[CONF_ENTITY_WP_ABSENK]
+        # Optional: improved start logic
+        self._eid_solcast_today: str = _data.get(CONF_ENTITY_SOLCAST_TODAY_KWH, "")
+        self._eid_solcast_tomorrow: str = _data.get(CONF_ENTITY_SOLCAST_TOMORROW_KWH, "")
+        self._eid_grid_power: str = _data.get(CONF_ENTITY_GRID_POWER, "")
 
         # Configurable thresholds (written by Number entities after restore)
         self.ziel_temp: float = DEFAULT_ZIEL_TEMP
@@ -79,6 +90,10 @@ class WarmwasserBoostCoordinator:
         self.min_soc: float = DEFAULT_MIN_SOC
         self.start_schwelle: float = DEFAULT_START_SCHWELLE
         self.fruhester_start_h: int = DEFAULT_FRUHESTER_START_H
+        self.min_forecast_today_kwh: float = DEFAULT_MIN_FORECAST_TODAY_KWH
+        self.min_forecast_tomorrow_kwh: float = DEFAULT_MIN_FORECAST_TOMORROW_KWH
+        self.min_grid_surplus_w: float = DEFAULT_MIN_GRID_SURPLUS_W
+        self.min_soc_grid: float = DEFAULT_MIN_SOC_GRID
 
         # Control flags (written by Switch entities after restore)
         self.automatik: bool = True
@@ -133,6 +148,8 @@ class WarmwasserBoostCoordinator:
             self._eid_soc,
             "sun.sun",
         ]
+        if self._eid_grid_power:
+            tracked.append(self._eid_grid_power)
         self._unsub.append(
             async_track_state_change_event(
                 self.hass, tracked, self._handle_sensor_change
@@ -206,12 +223,23 @@ class WarmwasserBoostCoordinator:
         if self._start_lock.locked():
             return
         async with self._start_lock:
-            if not self._should_start():
-                return
-            await self._async_boost_start(f"Auto: {trigger}")
+            if self._should_start_forecast():
+                await self._async_boost_start(f"Auto-Forecast: {trigger}")
+            elif self._should_start_grid_surplus():
+                await self._async_boost_start(f"Auto-Ueberschuss: {trigger}")
 
-    def _should_start(self) -> bool:
+    def _common_preconditions(self) -> bool:
+        """Shared guard: flags, WW-temp below threshold."""
         if not self.automatik or self.urlaub or self.boost_active or self.heute_gelaufen:
+            return False
+        ww_temp = self._float(self._eid_ww_temp)
+        if ww_temp is None or ww_temp >= self.start_schwelle:
+            return False
+        return True
+
+    def _should_start_forecast(self) -> bool:
+        """Forecast-based start: good hourly PV forecast + sufficient SoC."""
+        if not self._common_preconditions():
             return False
         if dt_util.now().hour < self.fruhester_start_h:
             return False
@@ -229,7 +257,6 @@ class WarmwasserBoostCoordinator:
         pv_this = self._float(self._eid_pv_this)
         pv_next = self._float(self._eid_pv_next)
         soc = self._float(self._eid_soc)
-        ww_temp = self._float(self._eid_ww_temp)
 
         if pv_this is None or pv_this <= self.min_pv_forecast:
             return False
@@ -237,8 +264,44 @@ class WarmwasserBoostCoordinator:
             return False
         if soc is None or soc <= self.min_soc:
             return False
-        if ww_temp is None or ww_temp >= self.start_schwelle:
+
+        # Today's total forecast: enough solar energy to bother?
+        if self._eid_solcast_today:
+            today_kwh = self._float(self._eid_solcast_today)
+            if today_kwh is not None and today_kwh < self.min_forecast_today_kwh:
+                return False
+
+        # Tomorrow much better than today → postpone boost to tomorrow
+        if self._eid_solcast_today and self._eid_solcast_tomorrow:
+            today_kwh = self._float(self._eid_solcast_today)
+            tomorrow_kwh = self._float(self._eid_solcast_tomorrow)
+            if (today_kwh is not None and tomorrow_kwh is not None
+                    and today_kwh < self.min_forecast_tomorrow_kwh
+                    and tomorrow_kwh > self.min_forecast_tomorrow_kwh):
+                return False
+
+        return True
+
+    def _should_start_grid_surplus(self) -> bool:
+        """Reactive start: currently exporting more than threshold to grid."""
+        if not self._eid_grid_power:
             return False
+        if not self._common_preconditions():
+            return False
+
+        # Sun must be above horizon (surplus should come from PV, not battery)
+        sun = self.hass.states.get("sun.sun")
+        if not sun or sun.state == "below_horizon":
+            return False
+
+        grid = self._float(self._eid_grid_power)
+        if grid is None or grid > -self.min_grid_surplus_w:
+            return False  # negative = export; not enough surplus
+
+        soc = self._float(self._eid_soc)
+        if soc is None or soc < self.min_soc_grid:
+            return False
+
         return True
 
     # ------------------------------------------------------------------ #
