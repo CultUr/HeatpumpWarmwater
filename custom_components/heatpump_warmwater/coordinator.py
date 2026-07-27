@@ -306,18 +306,12 @@ class WarmwasserBoostCoordinator:
 
         # WW temp decay: delay if WW stays comfortable until next WP Normal cycle
         # AND PV improves in the next period (worth waiting)
-        if self._ww_ok_until_next_normal_cycle():
-            pv_this = self._float(self._eid_pv_this)
-            pv_next = self._float(self._eid_pv_next)
-            if pv_this is not None and pv_next is not None and pv_next > pv_this * 1.2:
-                _LOGGER.debug(
-                    "Boost aufgeschoben: WW %.1f°C OK bis naechstem WP-Zyklus in %d min, "
-                    "PV steigt (%.0f->%.0f W)",
-                    self._float(self._eid_ww_temp) or 0,
-                    self._minutes_until_next_normal_cycle(),
-                    pv_this, pv_next,
-                )
-                return False
+        if self._ww_ok_until_next_normal_cycle() and pv_next > pv_this * 1.2:
+            _LOGGER.debug(
+                "Boost aufgeschoben: WW OK bis naechstem WP-Zyklus, PV steigt (%.0f->%.0f W)",
+                pv_this, pv_next,
+            )
+            return False
 
         return True
 
@@ -655,13 +649,14 @@ class WarmwasserBoostCoordinator:
         try:
             recorder = get_instance(self.hass)
             states_dict: dict = await recorder.async_add_executor_job(
-                get_significant_states,
-                self.hass, start, now, [self._eid_ww_temp],
-                None,   # filters
-                True,   # include_start_time_state
-                False,  # significant_changes_only — need all changes for rate calc
-                False,  # minimal_response
-                False,  # no_attributes
+                lambda: get_significant_states(
+                    self.hass, start, now, [self._eid_ww_temp],
+                    None,
+                    include_start_time_state=True,
+                    significant_changes_only=False,
+                    minimal_response=True,
+                    no_attributes=True,
+                )
             )
         except Exception as err:
             _LOGGER.debug("Recorder-Abfrage fehlgeschlagen: %s", err)
@@ -672,8 +667,7 @@ class WarmwasserBoostCoordinator:
             return None
 
         cooling_rates: list[float] = []
-        for i in range(1, len(states)):
-            prev, curr = states[i - 1], states[i]
+        for prev, curr in zip(states, states[1:]):
             try:
                 t_prev = float(prev.state)
                 t_curr = float(curr.state)
@@ -709,11 +703,11 @@ class WarmwasserBoostCoordinator:
         for start_m, end_m in windows:
             if start_m <= cur < end_m:
                 return 0  # currently in a Normal window
-        candidates = [s - cur for s, e in windows if s > cur]
+        candidates = [s - cur for s, _ in windows if s > cur]
         if candidates:
             return min(candidates)
         # Wrap to next day
-        first_start = min(s for s, e in windows)
+        first_start = min(s for s, _ in windows)
         return (24 * 60 - cur) + first_start
 
     def _ww_ok_until_next_normal_cycle(self) -> bool:
@@ -726,7 +720,14 @@ class WarmwasserBoostCoordinator:
         minutes_until_critical = (ww - self.ww_min_comfort) / self._cached_cooling_rate * 60
         minutes_until_normal = self._minutes_until_next_normal_cycle()
         # 30 min safety margin: WP needs time to heat after cycle starts
-        return minutes_until_critical > minutes_until_normal + 30
+        ok = minutes_until_critical > minutes_until_normal + 30
+        if ok:
+            _LOGGER.debug(
+                "WW %.1f°C OK: kritisch in %.0f min, WP-Zyklus in %d min (Marge: %.0f min)",
+                ww, minutes_until_critical, minutes_until_normal,
+                minutes_until_critical - minutes_until_normal - 30,
+            )
+        return ok
 
     # ------------------------------------------------------------------ #
     # Public API

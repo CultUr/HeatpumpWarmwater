@@ -92,10 +92,10 @@ def _collect_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, st
         "normal2_start":    own("number",        KEY_NORMAL2_START),
         "normal2_end":      own("number",        KEY_NORMAL2_END),
         # External sensors from user config
-        "ext_ww_temp":      _data.get(CONF_ENTITY_WW_TEMP, ""),
-        "ext_pv_power":     _data.get(CONF_ENTITY_PV_POWER, ""),
-        "ext_pv_forecast":  _data.get(CONF_ENTITY_PV_FORECAST_THIS, ""),
-        "ext_soc":          _data.get(CONF_ENTITY_SOC, ""),
+        "ext_ww_temp":      _data.get(CONF_ENTITY_WW_TEMP),
+        "ext_pv_power":     _data.get(CONF_ENTITY_PV_POWER),
+        "ext_pv_forecast":  _data.get(CONF_ENTITY_PV_FORECAST_THIS),
+        "ext_soc":          _data.get(CONF_ENTITY_SOC),
     }
 
 
@@ -194,18 +194,18 @@ def _overview_cards(em: dict[str, str]) -> list[dict[str, Any]]:
 
     # Status + Control side by side
     status_rows = _rows(
-        {"entity": em.get("status", ""),          "name": "Status"},
-        {"entity": em.get("aktiv", ""),            "name": "Boost aktiv"},
-        {"entity": em.get("heute_gelaufen", ""),   "name": "Heute gelaufen"},
-        {"entity": em.get("kwh_heute", ""),        "name": "kWh heute"},
-        {"entity": em.get("letzter_start", ""),    "name": "Letzter Start"},
-        {"entity": em.get("ext_pv_forecast", ""),  "name": "PV-Forecast aktuelle Std."},
+        {"entity": em.get("status"),          "name": "Status"},
+        {"entity": em.get("aktiv"),            "name": "Boost aktiv"},
+        {"entity": em.get("heute_gelaufen"),   "name": "Heute gelaufen"},
+        {"entity": em.get("kwh_heute"),        "name": "kWh heute"},
+        {"entity": em.get("letzter_start"),    "name": "Letzter Start"},
+        {"entity": em.get("ext_pv_forecast"),  "name": "PV-Forecast aktuelle Std."},
     )
     control_rows = _rows(
-        {"entity": em.get("automatik", ""),  "name": "Automatik"},
-        {"entity": em.get("urlaub", ""),     "name": "Urlaub"},
-        {"entity": em.get("btn_start", ""),  "name": "Manuell starten"},
-        {"entity": em.get("btn_end", ""),    "name": "Manuell beenden"},
+        {"entity": em.get("automatik"),  "name": "Automatik"},
+        {"entity": em.get("urlaub"),     "name": "Urlaub"},
+        {"entity": em.get("btn_start"),  "name": "Manuell starten"},
+        {"entity": em.get("btn_end"),    "name": "Manuell beenden"},
     )
 
     side: list[dict[str, Any]] = []
@@ -226,31 +226,31 @@ def _config_cards(em: dict[str, str]) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
 
     temp_rows = _rows(
-        {"entity": em.get("ziel_temp", ""),       "name": "Ziel-Temperatur"},
-        {"entity": em.get("reset_temp", ""),      "name": "Reset-Temperatur"},
-        {"entity": em.get("schwelle", ""),        "name": "Start-Schwelle WW"},
-        {"entity": em.get("ww_min_comfort", ""),  "name": "WW Mindestkomfort"},
+        {"entity": em.get("ziel_temp"),       "name": "Ziel-Temperatur"},
+        {"entity": em.get("reset_temp"),      "name": "Reset-Temperatur"},
+        {"entity": em.get("schwelle"),        "name": "Start-Schwelle WW"},
+        {"entity": em.get("ww_min_comfort"),  "name": "WW Mindestkomfort"},
     )
     if temp_rows:
         cards.append({"type": "entities", "title": "Temperaturen & Schwellen", "entities": temp_rows})
 
     pv_rows = _rows(
-        {"entity": em.get("min_pv", ""),            "name": "Min PV-Forecast (W)"},
-        {"entity": em.get("min_soc", ""),            "name": "Min Akku-SoC (Forecast-Start)"},
-        {"entity": em.get("fruhester", ""),          "name": "Fruehester Start (Stunde)"},
-        {"entity": em.get("min_today_kwh", ""),      "name": "Min Tages-Forecast heute (kWh)"},
-        {"entity": em.get("min_tomorrow_kwh", ""),   "name": "Aufschub wenn morgen besser (kWh)"},
-        {"entity": em.get("min_grid_surplus", ""),   "name": "Min Einspeisung Reaktiv-Start (W)"},
-        {"entity": em.get("min_soc_grid", ""),       "name": "Min SoC Reaktiv-Start (%)"},
+        {"entity": em.get("min_pv"),            "name": "Min PV-Forecast (W)"},
+        {"entity": em.get("min_soc"),            "name": "Min Akku-SoC (Forecast-Start)"},
+        {"entity": em.get("fruhester"),          "name": "Fruehester Start (Stunde)"},
+        {"entity": em.get("min_today_kwh"),      "name": "Min Tages-Forecast heute (kWh)"},
+        {"entity": em.get("min_tomorrow_kwh"),   "name": "Aufschub wenn morgen besser (kWh)"},
+        {"entity": em.get("min_grid_surplus"),   "name": "Min Einspeisung Reaktiv-Start (W)"},
+        {"entity": em.get("min_soc_grid"),       "name": "Min SoC Reaktiv-Start (%)"},
     )
     if pv_rows:
         cards.append({"type": "entities", "title": "PV & Startbedingungen", "entities": pv_rows})
 
     schedule_rows = _rows(
-        {"entity": em.get("normal1_start", ""),  "name": "Normal-Fenster 1 Start (h)"},
-        {"entity": em.get("normal1_end", ""),    "name": "Normal-Fenster 1 Ende (h)"},
-        {"entity": em.get("normal2_start", ""),  "name": "Normal-Fenster 2 Start (h)"},
-        {"entity": em.get("normal2_end", ""),    "name": "Normal-Fenster 2 Ende (h)"},
+        {"entity": em.get("normal1_start"),  "name": "Normal-Fenster 1 Start (h)"},
+        {"entity": em.get("normal1_end"),    "name": "Normal-Fenster 1 Ende (h)"},
+        {"entity": em.get("normal2_start"),  "name": "Normal-Fenster 2 Start (h)"},
+        {"entity": em.get("normal2_end"),    "name": "Normal-Fenster 2 Ende (h)"},
     )
     if schedule_rows:
         cards.append({"type": "entities", "title": "WP Zeitplan (Normal-Fenster)", "entities": schedule_rows})
