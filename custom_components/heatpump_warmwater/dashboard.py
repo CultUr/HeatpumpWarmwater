@@ -123,8 +123,13 @@ async def _ensure_registered(hass: HomeAssistant) -> None:
 
 async def _ensure_config(hass: HomeAssistant, em: dict[str, str]) -> None:
     store: Store = Store(hass, _STORE_VERSION, f"lovelace.{DASHBOARD_URL}")
-    if await store.async_load():
-        return  # User may have customized it — never overwrite
+    existing = await store.async_load()
+    if existing:
+        # Skip only if config already has cards — first write may have been empty
+        # (entities not yet in registry during initial platform setup)
+        views = existing.get("config", {}).get("views", [])
+        if any(v.get("cards") for v in views):
+            return
     await store.async_save({"config": _build_config(em)})
     _LOGGER.info("WW PV Boost Dashboard Konfiguration gespeichert")
 
