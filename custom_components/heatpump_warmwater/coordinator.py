@@ -654,8 +654,6 @@ class WarmwasserBoostCoordinator:
                     None,
                     include_start_time_state=True,
                     significant_changes_only=False,
-                    minimal_response=True,
-                    no_attributes=True,
                 )
             )
         except Exception as err:
