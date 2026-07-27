@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
@@ -21,8 +22,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Then start listeners (coordinator reads restored entity state)
     await coordinator.async_setup()
 
-    # Create Lovelace dashboard (idempotent — skips if already present)
-    await async_setup_dashboard(hass, entry)
+    # Dashboard setup: entity platform tasks are created (not awaited) inside
+    # async_forward_entry_setups, so entity registry writes are not yet complete
+    # when we return. Defer to ensure all entities are registered first.
+    async def _setup_dashboard(event=None) -> None:
+        await async_setup_dashboard(hass, entry)
+
+    if hass.is_running:
+        hass.async_create_task(_setup_dashboard())
+    else:
+        entry.async_on_unload(
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _setup_dashboard)
+        )
 
     # Reload on options change (entity IDs updated via options flow)
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))

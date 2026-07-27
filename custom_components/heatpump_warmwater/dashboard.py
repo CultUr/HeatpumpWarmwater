@@ -125,17 +125,28 @@ async def _ensure_config(hass: HomeAssistant, em: dict[str, str]) -> None:
     store: Store = Store(hass, _STORE_VERSION, f"lovelace.{DASHBOARD_URL}")
     existing = await store.async_load()
     if existing:
-        # Skip only if config already has cards — first write may have been empty
+        # Skip only if config already has content — first write may have been empty
         # (entities not yet in registry during initial platform setup)
         views = existing.get("config", {}).get("views", [])
-        if any(v.get("cards") for v in views):
+        if any(v.get("cards") or v.get("sections") for v in views):
             return
     await store.async_save({"config": _build_config(em)})
     _LOGGER.info("WW PV Boost Dashboard Konfiguration gespeichert")
 
 
-def _rows(*items: dict[str, str]) -> list[dict[str, str]]:
-    return [row for row in items if row.get("entity")]
+def _tile(*pairs: tuple[str | None, str]) -> list[dict[str, Any]]:
+    return [{"type": "tile", "entity": eid, "name": name} for eid, name in pairs if eid]
+
+
+def _tile_num(*pairs: tuple[str | None, str]) -> list[dict[str, Any]]:
+    return [
+        {"type": "tile", "entity": eid, "name": name, "features": [{"type": "numeric-input", "style": "buttons"}]}
+        for eid, name in pairs if eid
+    ]
+
+
+def _section(heading: str, icon: str, cards: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"type": "grid", "cards": [{"type": "heading", "heading": heading, "icon": icon}, *cards]}
 
 
 def _build_config(em: dict[str, str]) -> dict[str, Any]:
@@ -146,118 +157,90 @@ def _build_config(em: dict[str, str]) -> dict[str, Any]:
                 "title": "Uebersicht",
                 "path": "overview",
                 "icon": "mdi:water-thermometer-outline",
-                "cards": _overview_cards(em),
+                "type": "sections",
+                "max_columns": 3,
+                "sections": _overview_sections(em),
             },
             {
                 "title": "Konfiguration",
                 "path": "config",
                 "icon": "mdi:cog-outline",
-                "cards": _config_cards(em),
+                "type": "sections",
+                "max_columns": 3,
+                "sections": _config_sections(em),
             },
         ],
     }
 
 
-def _overview_cards(em: dict[str, str]) -> list[dict[str, Any]]:
-    cards: list[dict[str, Any]] = []
+def _overview_sections(em: dict[str, str]) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
 
-    # Gauges: WW-Temp | PV | SoC
-    gauges: list[dict[str, Any]] = []
-    if em.get("ext_ww_temp"):
-        gauges.append({
-            "type": "gauge",
-            "entity": em["ext_ww_temp"],
-            "name": "WW-Temperatur",
-            "unit": "°C",
-            "min": 20,
-            "max": 65,
-            "needle": True,
-            "severity": {"green": 45, "yellow": 38, "red": 0},
-        })
-    if em.get("ext_pv_power"):
-        gauges.append({
-            "type": "gauge",
-            "entity": em["ext_pv_power"],
-            "name": "PV-Leistung",
-            "min": 0,
-            "max": 12000,
-            "needle": True,
-            "severity": {"green": 3000, "yellow": 1000, "red": 0},
-        })
-    if em.get("ext_soc"):
-        gauges.append({
-            "type": "gauge",
-            "entity": em["ext_soc"],
-            "name": "Akku-SoC",
-            "min": 0,
-            "max": 100,
-            "needle": True,
-            "severity": {"green": 60, "yellow": 30, "red": 0},
-        })
-    if gauges:
-        cards.append({"type": "horizontal-stack", "cards": gauges})
-
-    # Status + Control side by side
-    status_rows = _rows(
-        {"entity": em.get("status"),          "name": "Status"},
-        {"entity": em.get("aktiv"),            "name": "Boost aktiv"},
-        {"entity": em.get("heute_gelaufen"),   "name": "Heute gelaufen"},
-        {"entity": em.get("kwh_heute"),        "name": "kWh heute"},
-        {"entity": em.get("letzter_start"),    "name": "Letzter Start"},
-        {"entity": em.get("ext_pv_forecast"),  "name": "PV-Forecast aktuelle Std."},
+    anlage = _tile(
+        (em.get("ext_ww_temp"), "WW-Temperatur"),
+        (em.get("ext_pv_power"), "PV-Leistung"),
+        (em.get("ext_soc"), "Akku-SoC"),
     )
-    control_rows = _rows(
-        {"entity": em.get("automatik"),  "name": "Automatik"},
-        {"entity": em.get("urlaub"),     "name": "Urlaub"},
-        {"entity": em.get("btn_start"),  "name": "Manuell starten"},
-        {"entity": em.get("btn_end"),    "name": "Manuell beenden"},
+    if anlage:
+        sections.append(_section("Anlage", "mdi:solar-power", anlage))
+
+    status = _tile(
+        (em.get("status"),          "Status"),
+        (em.get("aktiv"),           "Boost aktiv"),
+        (em.get("heute_gelaufen"),  "Heute gelaufen"),
+        (em.get("kwh_heute"),       "kWh heute"),
+        (em.get("letzter_start"),   "Letzter Start"),
+        (em.get("ext_pv_forecast"), "PV-Forecast heute"),
     )
+    if status:
+        sections.append(_section("Status", "mdi:information-outline", status))
 
-    side: list[dict[str, Any]] = []
-    if status_rows:
-        side.append({"type": "entities", "title": "Status", "entities": status_rows})
-    if control_rows:
-        side.append({"type": "entities", "title": "Steuerung", "entities": control_rows})
-
-    if len(side) == 2:
-        cards.append({"type": "horizontal-stack", "cards": side})
-    elif side:
-        cards.extend(side)
-
-    return cards
-
-
-def _config_cards(em: dict[str, str]) -> list[dict[str, Any]]:
-    cards: list[dict[str, Any]] = []
-
-    temp_rows = _rows(
-        {"entity": em.get("ziel_temp"),       "name": "Ziel-Temperatur"},
-        {"entity": em.get("reset_temp"),      "name": "Reset-Temperatur"},
-        {"entity": em.get("schwelle"),        "name": "Start-Schwelle WW"},
-        {"entity": em.get("ww_min_comfort"),  "name": "WW Mindestkomfort"},
+    control = _tile(
+        (em.get("automatik"), "Automatik"),
+        (em.get("urlaub"),    "Urlaub"),
+        (em.get("btn_start"), "Manuell starten"),
+        (em.get("btn_end"),   "Manuell beenden"),
     )
-    if temp_rows:
-        cards.append({"type": "entities", "title": "Temperaturen & Schwellen", "entities": temp_rows})
+    if control:
+        sections.append(_section("Steuerung", "mdi:tune", control))
 
-    pv_rows = _rows(
-        {"entity": em.get("min_pv"),            "name": "Min PV-Forecast (W)"},
-        {"entity": em.get("min_soc"),            "name": "Min Akku-SoC (Forecast-Start)"},
-        {"entity": em.get("fruhester"),          "name": "Fruehester Start (Stunde)"},
-        {"entity": em.get("min_today_kwh"),      "name": "Min Tages-Forecast heute (kWh)"},
-        {"entity": em.get("min_tomorrow_kwh"),   "name": "Aufschub wenn morgen besser (kWh)"},
-        {"entity": em.get("min_grid_surplus"),   "name": "Min Einspeisung Reaktiv-Start (W)"},
-        {"entity": em.get("min_soc_grid"),       "name": "Min SoC Reaktiv-Start (%)"},
+    return sections
+
+
+def _config_sections(em: dict[str, str]) -> list[dict[str, Any]]:
+    sections: list[dict[str, Any]] = []
+
+    temp = [
+        {"type": "tile", "entity": eid, "name": name, "features": [{"type": "numeric-input", "style": "slider"}]}
+        for eid, name in [
+            (em.get("ziel_temp"),      "Ziel-Temperatur"),
+            (em.get("reset_temp"),     "Reset-Temperatur"),
+            (em.get("schwelle"),       "Start-Schwelle WW"),
+            (em.get("ww_min_comfort"), "WW Mindestkomfort"),
+        ] if eid
+    ]
+    if temp:
+        sections.append(_section("Temperaturen & Schwellen", "mdi:thermometer", temp))
+
+    pv = _tile_num(
+        (em.get("min_pv"),           "Min PV-Forecast (W)"),
+        (em.get("min_soc"),          "Min Akku-SoC (%)"),
+        (em.get("fruhester"),        "Fruehester Start (h)"),
+        (em.get("min_today_kwh"),    "Min Tages-Forecast (kWh)"),
+        (em.get("min_tomorrow_kwh"), "Aufschub morgen besser (kWh)"),
+        (em.get("min_grid_surplus"), "Min Einspeisung Reaktiv (W)"),
+        (em.get("min_soc_grid"),     "Min SoC Reaktiv (%)"),
     )
-    if pv_rows:
-        cards.append({"type": "entities", "title": "PV & Startbedingungen", "entities": pv_rows})
+    if pv:
+        sections.append(_section("PV & Startbedingungen", "mdi:solar-panel", pv))
 
-    schedule_rows = _rows(
-        {"entity": em.get("normal1_start"),  "name": "Normal-Fenster 1 Start (h)"},
-        {"entity": em.get("normal1_end"),    "name": "Normal-Fenster 1 Ende (h)"},
-        {"entity": em.get("normal2_start"),  "name": "Normal-Fenster 2 Start (h)"},
-        {"entity": em.get("normal2_end"),    "name": "Normal-Fenster 2 Ende (h)"},
+    schedule = _tile_num(
+        (em.get("normal1_start"), "Fenster 1 Start (h)"),
+        (em.get("normal1_end"),   "Fenster 1 Ende (h)"),
+        (em.get("normal2_start"), "Fenster 2 Start (h)"),
+        (em.get("normal2_end"),   "Fenster 2 Ende (h)"),
     )
-    if schedule_rows:
-        cards.append({"type": "entities", "title": "WP Zeitplan (Normal-Fenster)", "entities": schedule_rows})
+    if schedule:
+        sections.append(_section("WP Normal-Fenster", "mdi:clock-time-four-outline", schedule))
 
-    return cards
+    return sections
