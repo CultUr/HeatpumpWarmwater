@@ -6,6 +6,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import WarmwasserBoostCoordinator
+from .dashboard import async_setup_dashboard
 
 PLATFORMS = ["switch", "binary_sensor", "sensor", "number", "button"]
 
@@ -19,6 +20,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Then start listeners (coordinator reads restored entity state)
     await coordinator.async_setup()
+
+    # Create Lovelace dashboard (idempotent — skips if already present)
+    await async_setup_dashboard(hass, entry)
 
     # Reload on options change (entity IDs updated via options flow)
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
