@@ -82,7 +82,12 @@
       "min_forecast_today_kwh": { "name": "Min Tages-PV-Forecast (kWh)" },
       "min_forecast_tomorrow_kwh": { "name": "Aufschub wenn morgen besser (kWh)" },
       "min_grid_surplus_w": { "name": "Min Netz-Einspeisung Reaktiv-Start (W)" },
-      "min_soc_grid": { "name": "Min Akku-SoC Reaktiv-Start (%)" }
+      "min_soc_grid": { "name": "Min Akku-SoC Reaktiv-Start (%)" },
+      "ww_min_comfort": { "name": "WW Mindestkomfort-Temperatur" },
+      "normal1_start_h": { "name": "WP Normal-Fenster 1 Start (Stunde)" },
+      "normal1_end_h": { "name": "WP Normal-Fenster 1 Ende (Stunde)" },
+      "normal2_start_h": { "name": "WP Normal-Fenster 2 Start (Stunde)" },
+      "normal2_end_h": { "name": "WP Normal-Fenster 2 Ende (Stunde)" }
     },
     "button": {
       "btn_start": { "name": "Manuell starten" },

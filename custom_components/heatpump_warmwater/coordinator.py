@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -37,6 +37,11 @@ from .const import (
     DEFAULT_MIN_FORECAST_TODAY_KWH,
     DEFAULT_MIN_FORECAST_TOMORROW_KWH,
     DEFAULT_MIN_GRID_SURPLUS_W,
+    DEFAULT_NORMAL1_END_H,
+    DEFAULT_NORMAL1_START_H,
+    DEFAULT_NORMAL2_END_H,
+    DEFAULT_NORMAL2_START_H,
+    DEFAULT_WW_MIN_COMFORT,
     DEFAULT_MIN_PV_FORECAST,
     DEFAULT_MIN_SOC,
     DEFAULT_MIN_SOC_GRID,
@@ -94,6 +99,14 @@ class WarmwasserBoostCoordinator:
         self.min_forecast_tomorrow_kwh: float = DEFAULT_MIN_FORECAST_TOMORROW_KWH
         self.min_grid_surplus_w: float = DEFAULT_MIN_GRID_SURPLUS_W
         self.min_soc_grid: float = DEFAULT_MIN_SOC_GRID
+        self.ww_min_comfort: float = DEFAULT_WW_MIN_COMFORT
+        self.normal1_start_h: int = DEFAULT_NORMAL1_START_H
+        self.normal1_end_h: int = DEFAULT_NORMAL1_END_H
+        self.normal2_start_h: int = DEFAULT_NORMAL2_START_H
+        self.normal2_end_h: int = DEFAULT_NORMAL2_END_H
+
+        # Auto-learned WW cooling rate from recorder history (°C/h)
+        self._cached_cooling_rate: float | None = None
 
         # Control flags (written by Switch entities after restore)
         self.automatik: bool = True
@@ -173,6 +186,13 @@ class WarmwasserBoostCoordinator:
 
         self._create_tracked_task(self._async_startup_healing())
 
+        # Refresh cooling rate daily at 01:00 and once after startup
+        self._unsub.append(
+            async_track_time_change(
+                self.hass, self._handle_cooling_rate_refresh, hour=1, minute=0, second=0
+            )
+        )
+
     async def async_unload(self) -> None:
         for unsub in self._unsub:
             unsub()
@@ -214,6 +234,10 @@ class WarmwasserBoostCoordinator:
         self.heute_gelaufen = False
         self.kwh_heute = 0.0
         self._notify("heute_gelaufen", "kwh_heute")
+
+    @callback
+    def _handle_cooling_rate_refresh(self, now: datetime) -> None:
+        self._create_tracked_task(self._async_refresh_cooling_rate())
 
     # ------------------------------------------------------------------ #
     # Start conditions
@@ -278,6 +302,21 @@ class WarmwasserBoostCoordinator:
             if (today_kwh is not None and tomorrow_kwh is not None
                     and today_kwh < self.min_forecast_tomorrow_kwh
                     and tomorrow_kwh > self.min_forecast_tomorrow_kwh):
+                return False
+
+        # WW temp decay: delay if WW stays comfortable until next WP Normal cycle
+        # AND PV improves in the next period (worth waiting)
+        if self._ww_ok_until_next_normal_cycle():
+            pv_this = self._float(self._eid_pv_this)
+            pv_next = self._float(self._eid_pv_next)
+            if pv_this is not None and pv_next is not None and pv_next > pv_this * 1.2:
+                _LOGGER.debug(
+                    "Boost aufgeschoben: WW %.1f°C OK bis naechstem WP-Zyklus in %d min, "
+                    "PV steigt (%.0f->%.0f W)",
+                    self._float(self._eid_ww_temp) or 0,
+                    self._minutes_until_next_normal_cycle(),
+                    pv_this, pv_next,
+                )
                 return False
 
         return True
@@ -566,6 +605,8 @@ class WarmwasserBoostCoordinator:
     async def _async_startup_healing(self) -> None:
         await asyncio.sleep(120)
         _LOGGER.debug("Startup-Heilung: Konsistenzpruefung...")
+        # Estimate cooling rate in background after startup
+        self._create_tracked_task(self._async_refresh_cooling_rate())
 
         normal = self._float(self._eid_wp_normal)
         if normal is None:
@@ -592,6 +633,100 @@ class WarmwasserBoostCoordinator:
                     sun.state if sun else "unknown", pv,
                 )
                 await self._async_boost_end(REASON_STARTUP_BOOST)
+
+    # ------------------------------------------------------------------ #
+    # WW temperature decay model (auto-learned from recorder history)
+    # ------------------------------------------------------------------ #
+
+    async def _async_refresh_cooling_rate(self) -> None:
+        rate = await self._estimate_cooling_rate()
+        if rate is not None:
+            self._cached_cooling_rate = rate
+            _LOGGER.debug("WW Abkuehlrate aktualisiert: %.3f °C/h", rate)
+
+    async def _estimate_cooling_rate(self) -> float | None:
+        """Estimate tank cooling rate (°C/h) from recorder history (last 48h)."""
+        # pylint: disable=import-outside-toplevel
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.history import get_significant_states
+
+        now = dt_util.utcnow()
+        start = now - timedelta(hours=48)
+        try:
+            recorder = get_instance(self.hass)
+            states_dict: dict = await recorder.async_add_executor_job(
+                get_significant_states,
+                self.hass, start, now, [self._eid_ww_temp],
+                None,   # filters
+                True,   # include_start_time_state
+                False,  # significant_changes_only — need all changes for rate calc
+                False,  # minimal_response
+                False,  # no_attributes
+            )
+        except Exception as err:
+            _LOGGER.debug("Recorder-Abfrage fehlgeschlagen: %s", err)
+            return None
+
+        states = states_dict.get(self._eid_ww_temp, [])
+        if len(states) < 4:
+            return None
+
+        cooling_rates: list[float] = []
+        for i in range(1, len(states)):
+            prev, curr = states[i - 1], states[i]
+            try:
+                t_prev = float(prev.state)
+                t_curr = float(curr.state)
+            except (ValueError, TypeError):
+                continue
+            dt_h = (curr.last_updated - prev.last_updated).total_seconds() / 3600
+            if dt_h <= 0:
+                continue
+            if t_prev > t_curr:
+                rate = (t_prev - t_curr) / dt_h
+                if 0.05 < rate < 5.0:  # sanity range
+                    cooling_rates.append(rate)
+
+        if not cooling_rates:
+            return None
+
+        # Median is more robust than mean against consumption spikes
+        median = sorted(cooling_rates)[len(cooling_rates) // 2]
+        _LOGGER.debug(
+            "Abkuehlrate: Median=%.3f °C/h aus %d Segmenten (min=%.3f max=%.3f)",
+            median, len(cooling_rates), min(cooling_rates), max(cooling_rates),
+        )
+        return median
+
+    def _minutes_until_next_normal_cycle(self) -> int:
+        """Return minutes until the next WP Normal heating cycle starts."""
+        now = dt_util.now()
+        cur = now.hour * 60 + now.minute
+        windows = [
+            (self.normal1_start_h * 60, self.normal1_end_h * 60),
+            (self.normal2_start_h * 60, self.normal2_end_h * 60),
+        ]
+        for start_m, end_m in windows:
+            if start_m <= cur < end_m:
+                return 0  # currently in a Normal window
+        candidates = [s - cur for s, e in windows if s > cur]
+        if candidates:
+            return min(candidates)
+        # Wrap to next day
+        first_start = min(s for s, e in windows)
+        return (24 * 60 - cur) + first_start
+
+    def _ww_ok_until_next_normal_cycle(self) -> bool:
+        """Return True if WW will stay above comfort threshold until WP heats naturally."""
+        if not self._cached_cooling_rate or self._cached_cooling_rate <= 0:
+            return False
+        ww = self._float(self._eid_ww_temp)
+        if ww is None:
+            return False
+        minutes_until_critical = (ww - self.ww_min_comfort) / self._cached_cooling_rate * 60
+        minutes_until_normal = self._minutes_until_next_normal_cycle()
+        # 30 min safety margin: WP needs time to heat after cycle starts
+        return minutes_until_critical > minutes_until_normal + 30
 
     # ------------------------------------------------------------------ #
     # Public API

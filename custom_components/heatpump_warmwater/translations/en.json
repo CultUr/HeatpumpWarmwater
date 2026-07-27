@@ -82,7 +82,12 @@
       "min_forecast_today_kwh": { "name": "Min daily PV forecast today (kWh)" },
       "min_forecast_tomorrow_kwh": { "name": "Postpone if tomorrow better (kWh)" },
       "min_grid_surplus_w": { "name": "Min grid export for reactive start (W)" },
-      "min_soc_grid": { "name": "Min battery SoC for reactive start (%)" }
+      "min_soc_grid": { "name": "Min battery SoC for reactive start (%)" },
+      "ww_min_comfort": { "name": "WW minimum comfort temperature" },
+      "normal1_start_h": { "name": "HP Normal window 1 start (hour)" },
+      "normal1_end_h": { "name": "HP Normal window 1 end (hour)" },
+      "normal2_start_h": { "name": "HP Normal window 2 start (hour)" },
+      "normal2_end_h": { "name": "HP Normal window 2 end (hour)" }
     },
     "button": {
       "btn_start": { "name": "Manual start" },

@@ -19,8 +19,13 @@ from .const import (
     DEFAULT_MIN_PV_FORECAST,
     DEFAULT_MIN_SOC,
     DEFAULT_MIN_SOC_GRID,
+    DEFAULT_NORMAL1_END_H,
+    DEFAULT_NORMAL1_START_H,
+    DEFAULT_NORMAL2_END_H,
+    DEFAULT_NORMAL2_START_H,
     DEFAULT_RESET_TEMP,
     DEFAULT_START_SCHWELLE,
+    DEFAULT_WW_MIN_COMFORT,
     DEFAULT_ZIEL_TEMP,
     DOMAIN,
     KEY_FRUHESTER,
@@ -30,11 +35,23 @@ from .const import (
     KEY_MIN_SOC_GRID,
     KEY_MIN_TODAY_KWH,
     KEY_MIN_TOMORROW_KWH,
+    KEY_NORMAL1_END,
+    KEY_NORMAL1_START,
+    KEY_NORMAL2_END,
+    KEY_NORMAL2_START,
     KEY_RESET_TEMP,
     KEY_SCHWELLE,
+    KEY_WW_MIN_COMFORT,
     KEY_ZIEL_TEMP,
 )
 from .coordinator import WarmwasserBoostCoordinator
+
+
+_INT_ATTRS = frozenset({
+    "fruhester_start_h",
+    "normal1_start_h", "normal1_end_h",
+    "normal2_start_h", "normal2_end_h",
+})
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -173,6 +190,71 @@ _NUMBERS: list[WwNumberDescription] = [
         coord_attr="min_soc_grid",
         entity_category=EntityCategory.CONFIG,
     ),
+    WwNumberDescription(
+        key=KEY_WW_MIN_COMFORT,
+        name="WW Mindestkomfort-Temperatur",
+        icon="mdi:thermometer-alert",
+        native_min_value=35.0,
+        native_max_value=52.0,
+        native_step=0.5,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        mode=NumberMode.BOX,
+        default=DEFAULT_WW_MIN_COMFORT,
+        coord_attr="ww_min_comfort",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    WwNumberDescription(
+        key=KEY_NORMAL1_START,
+        name="WP Normal-Fenster 1 Start (Stunde)",
+        icon="mdi:clock-start",
+        native_min_value=0.0,
+        native_max_value=23.0,
+        native_step=1.0,
+        native_unit_of_measurement="h",
+        mode=NumberMode.BOX,
+        default=float(DEFAULT_NORMAL1_START_H),
+        coord_attr="normal1_start_h",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    WwNumberDescription(
+        key=KEY_NORMAL1_END,
+        name="WP Normal-Fenster 1 Ende (Stunde)",
+        icon="mdi:clock-end",
+        native_min_value=0.0,
+        native_max_value=23.0,
+        native_step=1.0,
+        native_unit_of_measurement="h",
+        mode=NumberMode.BOX,
+        default=float(DEFAULT_NORMAL1_END_H),
+        coord_attr="normal1_end_h",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    WwNumberDescription(
+        key=KEY_NORMAL2_START,
+        name="WP Normal-Fenster 2 Start (Stunde)",
+        icon="mdi:clock-start",
+        native_min_value=0.0,
+        native_max_value=23.0,
+        native_step=1.0,
+        native_unit_of_measurement="h",
+        mode=NumberMode.BOX,
+        default=float(DEFAULT_NORMAL2_START_H),
+        coord_attr="normal2_start_h",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    WwNumberDescription(
+        key=KEY_NORMAL2_END,
+        name="WP Normal-Fenster 2 Ende (Stunde)",
+        icon="mdi:clock-end",
+        native_min_value=0.0,
+        native_max_value=23.0,
+        native_step=1.0,
+        native_unit_of_measurement="h",
+        mode=NumberMode.BOX,
+        default=float(DEFAULT_NORMAL2_END_H),
+        coord_attr="normal2_end_h",
+        entity_category=EntityCategory.CONFIG,
+    ),
 ]
 
 
@@ -213,7 +295,7 @@ class WwNumber(NumberEntity, RestoreEntity):
             except (ValueError, TypeError):
                 pass
         desc: WwNumberDescription = self.entity_description  # type: ignore[assignment]
-        val = int(self._value) if desc.coord_attr == "fruhester_start_h" else self._value
+        val = int(self._value) if desc.coord_attr in _INT_ATTRS else self._value
         setattr(self._coordinator, desc.coord_attr, val)
         self._coordinator.register_entity(desc.key, self)
 
@@ -224,6 +306,6 @@ class WwNumber(NumberEntity, RestoreEntity):
     async def async_set_native_value(self, value: float) -> None:
         self._value = value
         desc: WwNumberDescription = self.entity_description  # type: ignore[assignment]
-        val = int(value) if desc.coord_attr == "fruhester_start_h" else value
+        val = int(value) if desc.coord_attr in _INT_ATTRS else value
         setattr(self._coordinator, desc.coord_attr, val)
         self.async_write_ha_state()

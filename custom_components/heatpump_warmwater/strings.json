@@ -49,5 +49,14 @@
     "error": {
       "entity_not_found": "Entity nicht gefunden. Bitte eine gueltige Entity auswaehlen."
     }
+  },
+  "entity": {
+    "number": {
+      "ww_min_comfort": { "name": "WW Mindestkomfort-Temperatur" },
+      "normal1_start_h": { "name": "WP Normal-Fenster 1 Start (Stunde)" },
+      "normal1_end_h": { "name": "WP Normal-Fenster 1 Ende (Stunde)" },
+      "normal2_start_h": { "name": "WP Normal-Fenster 2 Start (Stunde)" },
+      "normal2_end_h": { "name": "WP Normal-Fenster 2 Ende (Stunde)" }
+    }
   }
 }

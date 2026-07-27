@@ -28,6 +28,11 @@ DEFAULT_MIN_FORECAST_TODAY_KWH = 6.0    # kWh — Mindestertrag heute für Forec
 DEFAULT_MIN_FORECAST_TOMORROW_KWH = 15.0  # kWh — "morgen viel besser" → heute aufschieben
 DEFAULT_MIN_GRID_SURPLUS_W = 1000.0     # W Einspeisung ins Netz → reaktiver Start
 DEFAULT_MIN_SOC_GRID = 20.0             # % — niedrigere SoC-Schwelle bei Überschuss-Start
+DEFAULT_WW_MIN_COMFORT = 42.0           # °C — WW-Mindesttemperatur vor dringendem Boost
+DEFAULT_NORMAL1_START_H = 5             # WP Normal-Fenster 1 Start (Stunde)
+DEFAULT_NORMAL1_END_H = 8               # WP Normal-Fenster 1 Ende (Stunde)
+DEFAULT_NORMAL2_START_H = 11            # WP Normal-Fenster 2 Start (Stunde)
+DEFAULT_NORMAL2_END_H = 16              # WP Normal-Fenster 2 Ende (Stunde)
 
 # Modbus wait timeout
 MODBUS_WAIT_TIMEOUT = 120.0  # seconds
@@ -74,3 +79,8 @@ KEY_MIN_TODAY_KWH = "min_forecast_today_kwh"
 KEY_MIN_TOMORROW_KWH = "min_forecast_tomorrow_kwh"
 KEY_MIN_GRID_SURPLUS = "min_grid_surplus_w"
 KEY_MIN_SOC_GRID = "min_soc_grid"
+KEY_WW_MIN_COMFORT = "ww_min_comfort"
+KEY_NORMAL1_START = "normal1_start_h"
+KEY_NORMAL1_END = "normal1_end_h"
+KEY_NORMAL2_START = "normal2_start_h"
+KEY_NORMAL2_END = "normal2_end_h"
