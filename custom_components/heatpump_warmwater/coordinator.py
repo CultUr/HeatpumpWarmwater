@@ -633,6 +633,7 @@ class WarmwasserBoostCoordinator:
                 "Startup-Heilung Fall 1: Normal=%.1f > Reset=%.1f, aktiv=False",
                 normal, self.reset_temp,
             )
+            self.boost_active = True  # allow _async_boost_end to proceed
             await self._async_boost_end(REASON_STARTUP)
             return
 
