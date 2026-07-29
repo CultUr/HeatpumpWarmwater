@@ -500,6 +500,14 @@ class WarmwasserBoostCoordinator:
         for name in ("_pv_low_task", "_soc_low_task", "_temp_reached_task"):
             self._cancel_task(name)
 
+    def _create_persistent_notification(self, title: str, message: str, notification_id: str) -> None:
+        self.hass.async_create_task(
+            self.hass.services.async_call(
+                "persistent_notification", "create",
+                {"title": title, "message": message, "notification_id": notification_id},
+            )
+        )
+
     # ------------------------------------------------------------------ #
     # Boost end sequence
     # ------------------------------------------------------------------ #
@@ -520,77 +528,90 @@ class WarmwasserBoostCoordinator:
             energy_now = self._float(self._eid_ww_energy) or 0.0
             boost_kwh = max(0.0, energy_now - self.kwh_startwert)
 
-        # 1. Reset Absenk to standby value
-        await self.hass.services.async_call(
-            "number", "set_value",
-            {"entity_id": self._eid_wp_absenk, "value": 35.0},
-            blocking=True,
-        )
+        try:
+            # 1. Reset Absenk to standby value
+            try:
+                await self.hass.services.async_call(
+                    "number", "set_value",
+                    {"entity_id": self._eid_wp_absenk, "value": 35.0},
+                    blocking=True,
+                )
+            except Exception as err:
+                _LOGGER.error("Boost-Ende: Absenk-Reset fehlgeschlagen (%s)", err)
+                self._create_persistent_notification(
+                    "WW-Ueberladung: Absenk-Reset fehlgeschlagen",
+                    f"Absenk konnte nach Boost-Ende nicht auf 35 Grad zurueckgesetzt werden: {err}. "
+                    f"Bitte manuell pruefen.",
+                    "ww_boost_absenk_reset_fehler",
+                )
 
-        # 2. Wait for Normal.min to drop (Modbus propagation after Absenk reset)
-        reset = self.reset_temp
-        ok = await self._wait_attr(
-            self._eid_wp_normal, "min",
-            lambda v: v <= reset + 1,
-            MODBUS_WAIT_TIMEOUT,
-        )
-
-        if ok:
-            await self.hass.services.async_call(
-                "number", "set_value",
-                {"entity_id": self._eid_wp_normal, "value": reset},
-                blocking=True,
+            # 2. Wait for Normal.min to drop (Modbus propagation after Absenk reset)
+            reset = self.reset_temp
+            ok = await self._wait_attr(
+                self._eid_wp_normal, "min",
+                lambda v: v <= reset + 1,
+                MODBUS_WAIT_TIMEOUT,
             )
-        else:
-            normal_min = self._attr(self._eid_wp_normal, "min")
-            _LOGGER.warning(
-                "Normal-Sollwert Timeout nach Boost-Ende "
-                "(Normal.min=%s, Reset-Temp=%.1f). Bitte manuell pruefen.",
-                normal_min, reset,
+            if ok:
+                try:
+                    await self.hass.services.async_call(
+                        "number", "set_value",
+                        {"entity_id": self._eid_wp_normal, "value": reset},
+                        blocking=True,
+                    )
+                except Exception as err:
+                    _LOGGER.error("Boost-Ende: Normal-Reset fehlgeschlagen (%s)", err)
+                    self._create_persistent_notification(
+                        "WW-Ueberladung: Waermepumpe pruefen",
+                        f"Normal-Sollwert konnte nach Boost-Ende nicht auf {reset:.0f} Grad zurueckgesetzt werden: {err}. "
+                        f"Bitte manuell pruefen.",
+                        "ww_boost_normal_reset_fehler",
+                    )
+            else:
+                normal_min = self._attr(self._eid_wp_normal, "min")
+                _LOGGER.warning(
+                    "Normal-Sollwert Timeout nach Boost-Ende "
+                    "(Normal.min=%s, Reset-Temp=%.1f). Bitte manuell pruefen.",
+                    normal_min, reset,
+                )
+                self._create_persistent_notification(
+                    "WW-Ueberladung: Waermepumpe pruefen",
+                    (
+                        f"Normal-Sollwert konnte nach Boost-Ende nicht zurueckgesetzt werden. "
+                        f"Bitte WP-Sollwert manuell auf {reset:.0f} Grad pruefen. "
+                        f"(Normal.min war: {normal_min} Grad)"
+                    ),
+                    "ww_boost_normal_reset_fehler",
+                )
+        finally:
+            # Always restore accounting and status, even on unexpected exception
+            self.kwh_heute += boost_kwh
+            self.status = STATUS_IDLE
+            self._notify_all()
+
+            _LOGGER.info(
+                "WW Boost Ende (%s) — WW: %s°C, PV: %s W, SoC: %s%%, "
+                "Boost: %.3f kWh, Tag: %.3f kWh",
+                reason,
+                self._float(self._eid_ww_temp), self._float(self._eid_pv_power),
+                self._float(self._eid_soc), boost_kwh, self.kwh_heute,
             )
             self.hass.async_create_task(
                 self.hass.services.async_call(
-                    "persistent_notification", "create",
+                    "logbook", "log",
                     {
-                        "title": "WW-Ueberladung: Waermepumpe pruefen",
+                        "name": "WW-Ueberladung",
                         "message": (
-                            f"Normal-Sollwert konnte nach Boost-Ende nicht zurueckgesetzt werden. "
-                            f"Bitte WP-Sollwert manuell auf {reset:.0f} Grad pruefen. "
-                            f"(Normal.min war: {normal_min} Grad)"
+                            f"Ende ({reason}) — "
+                            f"WW: {self._float(self._eid_ww_temp)} °C, "
+                            f"PV: {self._float(self._eid_pv_power)} W, "
+                            f"SoC: {self._float(self._eid_soc)} %, "
+                            f"Boost-kWh: {boost_kwh:.3f} kWh, "
+                            f"Tagesbilanz: {self.kwh_heute:.3f} kWh"
                         ),
-                        "notification_id": "ww_boost_normal_reset_fehler",
                     },
                 )
             )
-
-        # 3. Accounting and flag reset
-        self.kwh_heute += boost_kwh
-        self.status = STATUS_IDLE
-        self._notify_all()
-
-        _LOGGER.info(
-            "WW Boost Ende (%s) — WW: %s°C, PV: %s W, SoC: %s%%, "
-            "Boost: %.3f kWh, Tag: %.3f kWh",
-            reason,
-            self._float(self._eid_ww_temp), self._float(self._eid_pv_power),
-            self._float(self._eid_soc), boost_kwh, self.kwh_heute,
-        )
-        self.hass.async_create_task(
-            self.hass.services.async_call(
-                "logbook", "log",
-                {
-                    "name": "WW-Ueberladung",
-                    "message": (
-                        f"Ende ({reason}) — "
-                        f"WW: {self._float(self._eid_ww_temp)} °C, "
-                        f"PV: {self._float(self._eid_pv_power)} W, "
-                        f"SoC: {self._float(self._eid_soc)} %, "
-                        f"Boost-kWh: {boost_kwh:.3f} kWh, "
-                        f"Tagesbilanz: {self.kwh_heute:.3f} kWh"
-                    ),
-                },
-            )
-        )
 
     # ------------------------------------------------------------------ #
     # Startup healing
@@ -808,5 +829,9 @@ class WarmwasserBoostCoordinator:
     def _create_tracked_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
         task = self.hass.async_create_task(coro)
         self._active_tasks.add(task)
-        task.add_done_callback(self._active_tasks.discard)
+        def _on_done(t: asyncio.Task) -> None:
+            self._active_tasks.discard(t)
+            if not t.cancelled() and (exc := t.exception()):
+                _LOGGER.error("Coordinator-Task fehlgeschlagen: %s", exc, exc_info=exc)
+        task.add_done_callback(_on_done)
         return task
