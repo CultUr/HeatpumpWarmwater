@@ -215,7 +215,7 @@ class TestShouldStartGridSurplus:
         assert self._base_coord(grid=-500)._should_start_grid_surplus() is False
 
     def test_soc_too_low(self):
-        # soc=15 < min_soc_grid=20 → False
+        # soc=15 < min_soc=60 → False
         assert self._base_coord(soc=15)._should_start_grid_surplus() is False
 
     def test_preconditions_block(self):

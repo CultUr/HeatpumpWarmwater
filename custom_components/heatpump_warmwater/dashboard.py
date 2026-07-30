@@ -25,7 +25,6 @@ from .const import (
     KEY_MIN_GRID_SURPLUS,
     KEY_MIN_PV,
     KEY_MIN_SOC,
-    KEY_MIN_SOC_GRID,
     KEY_MIN_TODAY_KWH,
     KEY_MIN_TOMORROW_KWH,
     KEY_NORMAL1_END,
@@ -86,7 +85,6 @@ def _collect_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, st
         "min_today_kwh":    own("number",        KEY_MIN_TODAY_KWH),
         "min_tomorrow_kwh": own("number",        KEY_MIN_TOMORROW_KWH),
         "min_grid_surplus": own("number",        KEY_MIN_GRID_SURPLUS),
-        "min_soc_grid":     own("number",        KEY_MIN_SOC_GRID),
         "normal1_start":    own("number",        KEY_NORMAL1_START),
         "normal1_end":      own("number",        KEY_NORMAL1_END),
         "normal2_start":    own("number",        KEY_NORMAL2_START),
@@ -229,7 +227,6 @@ def _config_sections(em: dict[str, str]) -> list[dict[str, Any]]:
         (em.get("min_today_kwh"),    "Min Tages-Forecast (kWh)"),
         (em.get("min_tomorrow_kwh"), "Aufschub morgen besser (kWh)"),
         (em.get("min_grid_surplus"), "Min Einspeisung Reaktiv (W)"),
-        (em.get("min_soc_grid"),     "Min SoC Reaktiv (%)"),
     )
     if pv:
         sections.append(_section("PV & Startbedingungen", "mdi:solar-panel", pv))
