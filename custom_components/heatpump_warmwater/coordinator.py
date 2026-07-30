@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import statistics
 from datetime import datetime, timedelta
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -42,9 +43,9 @@ from .const import (
     DEFAULT_NORMAL2_END_H,
     DEFAULT_NORMAL2_START_H,
     DEFAULT_WW_MIN_COMFORT,
+    DEFAULT_ABSENK_RESET,
     DEFAULT_MIN_PV_FORECAST,
     DEFAULT_MIN_SOC,
-    DEFAULT_MIN_SOC_GRID,
     DEFAULT_RESET_TEMP,
     DEFAULT_START_SCHWELLE,
     DEFAULT_ZIEL_TEMP,
@@ -98,7 +99,6 @@ class WarmwasserBoostCoordinator:
         self.min_forecast_today_kwh: float = DEFAULT_MIN_FORECAST_TODAY_KWH
         self.min_forecast_tomorrow_kwh: float = DEFAULT_MIN_FORECAST_TOMORROW_KWH
         self.min_grid_surplus_w: float = DEFAULT_MIN_GRID_SURPLUS_W
-        self.min_soc_grid: float = DEFAULT_MIN_SOC_GRID
         self.ww_min_comfort: float = DEFAULT_WW_MIN_COMFORT
         self.normal1_start_h: int = DEFAULT_NORMAL1_START_H
         self.normal1_end_h: int = DEFAULT_NORMAL1_END_H
@@ -200,10 +200,10 @@ class WarmwasserBoostCoordinator:
         for task in list(self._active_tasks):
             task.cancel()
         self._active_tasks.clear()
-        for attr in (
-            "_timeout_task", "_pv_low_task", "_soc_low_task", "_temp_reached_task",
-        ):
-            self._cancel_task(attr)
+        self._timeout_task = None
+        self._pv_low_task = None
+        self._soc_low_task = None
+        self._temp_reached_task = None
 
     # ------------------------------------------------------------------ #
     # Event handlers
@@ -254,6 +254,8 @@ class WarmwasserBoostCoordinator:
 
     def _common_preconditions(self) -> bool:
         """Shared guard: flags, WW-temp below threshold."""
+        if self.status != STATUS_IDLE:
+            return False
         if not self.automatik or self.urlaub or self.boost_active or self.heute_gelaufen:
             return False
         ww_temp = self._float(self._eid_ww_temp)
@@ -289,17 +291,15 @@ class WarmwasserBoostCoordinator:
         if soc is None or soc <= self.min_soc:
             return False
 
-        # Today's total forecast: enough solar energy to bother?
-        if self._eid_solcast_today:
-            today_kwh = self._float(self._eid_solcast_today)
-            if today_kwh is not None and today_kwh < self.min_forecast_today_kwh:
-                return False
+        # Today's and tomorrow's total forecast (computed once)
+        today_kwh: float | None = self._float(self._eid_solcast_today) if self._eid_solcast_today else None
+        if today_kwh is not None and today_kwh < self.min_forecast_today_kwh:
+            return False
 
         # Tomorrow much better than today → postpone boost to tomorrow
-        if self._eid_solcast_today and self._eid_solcast_tomorrow:
-            today_kwh = self._float(self._eid_solcast_today)
+        if today_kwh is not None and self._eid_solcast_tomorrow:
             tomorrow_kwh = self._float(self._eid_solcast_tomorrow)
-            if (today_kwh is not None and tomorrow_kwh is not None
+            if (tomorrow_kwh is not None
                     and today_kwh < self.min_forecast_tomorrow_kwh
                     and tomorrow_kwh > self.min_forecast_tomorrow_kwh):
                 return False
@@ -332,7 +332,7 @@ class WarmwasserBoostCoordinator:
             return False  # negative = export; not enough surplus
 
         soc = self._float(self._eid_soc)
-        if soc is None or soc < self.min_soc_grid:
+        if soc is None or soc < self.min_soc:
             return False
 
         return True
@@ -533,14 +533,14 @@ class WarmwasserBoostCoordinator:
             try:
                 await self.hass.services.async_call(
                     "number", "set_value",
-                    {"entity_id": self._eid_wp_absenk, "value": 35.0},
+                    {"entity_id": self._eid_wp_absenk, "value": DEFAULT_ABSENK_RESET},
                     blocking=True,
                 )
             except Exception as err:
                 _LOGGER.error("Boost-Ende: Absenk-Reset fehlgeschlagen (%s)", err)
                 self._create_persistent_notification(
                     "WW-Ueberladung: Absenk-Reset fehlgeschlagen",
-                    f"Absenk konnte nach Boost-Ende nicht auf 35 Grad zurueckgesetzt werden: {err}. "
+                    f"Absenk konnte nach Boost-Ende nicht auf {DEFAULT_ABSENK_RESET:.0f} Grad zurueckgesetzt werden: {err}. "
                     f"Bitte manuell pruefen.",
                     "ww_boost_absenk_reset_fehler",
                 )
@@ -705,7 +705,7 @@ class WarmwasserBoostCoordinator:
             return None
 
         # Median is more robust than mean against consumption spikes
-        median = sorted(cooling_rates)[len(cooling_rates) // 2]
+        median = statistics.median(cooling_rates)
         _LOGGER.debug(
             "Abkuehlrate: Median=%.3f °C/h aus %d Segmenten (min=%.3f max=%.3f)",
             median, len(cooling_rates), min(cooling_rates), max(cooling_rates),
@@ -754,7 +754,7 @@ class WarmwasserBoostCoordinator:
     # ------------------------------------------------------------------ #
 
     async def async_manual_start(self) -> None:
-        if self.boost_active or self.urlaub:
+        if self.boost_active or self.urlaub or self.status != STATUS_IDLE:
             return
         await self._async_boost_start("Manuell")
 
@@ -823,7 +823,7 @@ class WarmwasserBoostCoordinator:
 
     def _cancel_task(self, attr_name: str) -> None:
         task: asyncio.Task | None = getattr(self, attr_name, None)
-        if task and not task.done():
+        if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
         setattr(self, attr_name, None)
 
